@@ -1,0 +1,16 @@
+[project]
+name = "cex-volume-tracker"
+version = "0.1.0"
+description = "A project to track cryptocurrency volume on Binance and send alerts."
+dependencies = [
+    "requests",
+    "pandas",
+    "python-binance",
+    "schedule",
+    "numpy", # Added numpy as it's often a dependency for pandas operations, and the user mentioned np.float64
+]
+requires-python = ">=3.8"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

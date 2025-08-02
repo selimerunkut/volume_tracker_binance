@@ -1,0 +1,110 @@
+import requests
+import json
+import pandas as pd
+from binance.client import Client
+import datetime
+import schedule
+import time
+from alert_levels_tg import get_volume_alert_details
+from telegram_alerts import send_telegram_message  # Import the Telegram alert function
+
+
+def generate_tradingview_url(symbol):
+    # TradingView URL format
+    return f"https://www.tradingview.com/symbols/{symbol}/?exchange=BINANCE"
+
+def generate_binance_trade_url(symbol):
+    # Binance trade URL format
+    # Example: https://www.binance.com/en/trade/AUCTION_USDC
+    # The symbol from the client.get_exchange_info() is already in the correct format (e.g., "AUCTIONUSDC")
+    # We need to insert an underscore before the quote asset (USDC)
+    if symbol.endswith('USDC'):
+        base_asset = symbol[:-4]
+        return f"https://www.binance.com/en/trade/{base_asset}_USDC"
+    return f"https://www.binance.com/en/trade/{symbol}"
+
+def run_script():
+    print(f"[{datetime.datetime.now()}] Starting run_script...")
+    # Load Binance credentials
+    with open('credentials_b.json') as f:
+        credentials = json.load(f)
+    api_key = credentials['Binance_api_key']
+    api_secret = credentials['Binance_secret_key']
+    client = Client(api_key, api_secret)
+    
+    # Fetch symbols for analysis
+    # Define specific symbols for testing
+    # Note: Binance symbols typically do not use underscores (e.g., SAHARUSDC, SOPHUSDC, HEIUSDC)
+    #usdc_pairs = ["SAHAR_USDC", "SOPH_USDC", "HEI_USDC"] # Example pairs provided by user
+    # If you want to revert to fetching all USDC pairs, uncomment the lines below
+    symbols = client.get_exchange_info()['symbols']
+    usdc_pairs = [s['symbol'] for s in symbols if (s['quoteAsset'] == 'USDC') and 'UPUSDC' not in s['symbol']
+                   and 'DOWNUSDC' not in s['symbol'] and 'BEARUSDC' not in s['symbol'] and 'BULLUSDC' not in s['symbol']]
+                   # Removed specific delisted pairs as per user feedback, focusing on USDC
+    
+    print(f"[{datetime.datetime.now()}] Fetched {len(usdc_pairs)} USDC pairs.")
+    
+    for symbol in usdc_pairs:
+        interval = '1h'
+        limit = 25
+        url = f'https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}'
+        print(f"[{datetime.datetime.now()}] Fetching data for {symbol}...")
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            data = response.json()
+            df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close", "volume", "close_time", "quote_asset_volume", "number_of_trades", "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+            df["volume"] = pd.to_numeric(df["volume"])
+            
+            if len(df) > 2:
+                curr_volume = df['volume'].iloc[-2]
+                past_24_hours = df.iloc[:-2]['volume'].astype(float)
+                prev_volume_mean = past_24_hours.mean()
+                print(f"[{datetime.datetime.now()}] {symbol}: Current Volume = {curr_volume}, Previous 24h Mean Volume = {prev_volume_mean}")
+                
+                alert_details_list = get_volume_alert_details(curr_volume, prev_volume_mean, symbol, '1h', 'BINANCE')
+
+                if alert_details_list:
+                    print(f"[{datetime.datetime.now()}] Alerts generated for {symbol}: {len(alert_details_list)}")
+                else:
+                    print(f"[{datetime.datetime.now()}] No alerts for {symbol}.")
+                    
+            for alert_detail in alert_details_list:
+                tradingview_url = generate_tradingview_url(alert_detail['symbol'])
+                binance_trade_url = generate_binance_trade_url(alert_detail['symbol'])
+
+                alert_message = {
+                    'exchange': 'BINANCE',
+                    'symbol': alert_detail['symbol'],
+                    'curr_volume': alert_detail['curr_volume'],
+                    'prev_volume_mean': alert_detail['prev_volume_mean'],
+                    'level': alert_detail['level'],
+                    'chart_url': tradingview_url,
+                    'binance_trade_url': binance_trade_url
+                }
+                print(f"[{datetime.datetime.now()}] Sending Telegram message for {symbol} (Level: {alert_detail['level']})...")
+                send_telegram_message(alert_message)
+
+        except requests.exceptions.RequestException as e:
+            print(f"[{datetime.datetime.now()}] Error fetching data for {symbol}: {e}")
+        except ValueError as e:
+            print(f"[{datetime.datetime.now()}] Error processing data for {symbol}: {e}")
+        except Exception as e:
+            print(f"[{datetime.datetime.now()}] An unexpected error occurred for {symbol}: {e}")
+
+# # Schedule the script to run at the specified times
+# for hour in range(24):
+#     schedule.every().day.at("{:02d}:01".format(hour)).do(run_script)
+#     print(f"[{datetime.datetime.now()}] Scheduled run_script at {hour:02d}:01 daily.")
+
+# print(f"[{datetime.datetime.now()}] Starting scheduler. Press Ctrl+C to stop.")
+# # Run the scheduled tasks indefinitely
+# while True:
+#     schedule.run_pending()
+#     time.sleep(1)
+
+if __name__ == "__main__":
+    # This block will run the script once immediately for testing purposes.
+    # You can remove this block after successful testing.
+    run_script()
