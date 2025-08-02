@@ -11,3 +11,7 @@ venv/
 # Specific to this project
 credentials_b.json
 credentials_telegram.json
+
+.DS_Store
+cex_volume_tracker.egg-info
+uv.lock
