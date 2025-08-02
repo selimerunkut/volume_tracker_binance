@@ -21,6 +21,9 @@ def generate_binance_trade_url(symbol):
     if symbol.endswith('USDC'):
         base_asset = symbol[:-4]
         return f"https://www.binance.com/en/trade/{base_asset}_USDC"
+    elif symbol.endswith('BTC'):
+        base_asset = symbol[:-3]
+        return f"https://www.binance.com/en/trade/{base_asset}_BTC"
     return f"https://www.binance.com/en/trade/{symbol}"
 
 def run_script():
@@ -38,15 +41,21 @@ def run_script():
     #usdc_pairs = ["SAHAR_USDC", "SOPH_USDC", "HEI_USDC"] # Example pairs provided by user
     # If you want to revert to fetching all USDC pairs, uncomment the lines below
     symbols = client.get_exchange_info()['symbols']
+    
     usdc_pairs = [s['symbol'] for s in symbols if (s['quoteAsset'] == 'USDC') and 'UPUSDC' not in s['symbol']
                    and 'DOWNUSDC' not in s['symbol'] and 'BEARUSDC' not in s['symbol'] and 'BULLUSDC' not in s['symbol']]
-                   # Removed specific delisted pairs as per user feedback, focusing on USDC
     
-    print(f"[{datetime.datetime.now()}] Fetched {len(usdc_pairs)} USDC pairs.")
+    btc_pairs = [s['symbol'] for s in symbols if (s['quoteAsset'] == 'BTC') and 'UPBTC' not in s['symbol']
+                   and 'DOWNBTC' not in s['symbol'] and 'BEARBTC' not in s['symbol'] and 'BULLBTC' not in s['symbol']]
+                   
+    all_pairs = usdc_pairs + btc_pairs
     
-    for symbol in usdc_pairs:
+    print(f"[{datetime.datetime.now()}] Fetched {len(usdc_pairs)} USDC pairs and {len(btc_pairs)} BTC pairs. Total: {len(all_pairs)} pairs.")
+    
+    for symbol in all_pairs:
         interval = '1h'
-        limit = 25
+        limit = 25 # This specifies the number of historical klines (candlesticks) to fetch from the Binance API.
+                   # A limit of 25 for '1h' interval means it fetches the last 25 hours of data.
         url = f'https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}'
         print(f"[{datetime.datetime.now()}] Fetching data for {symbol}...")
         try:
