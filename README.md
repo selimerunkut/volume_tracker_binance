@@ -74,8 +74,8 @@ After=network.target
 
 [Service]
 User=your_username
-WorkingDirectory=/path/to/your/CEX_volume_tracker_B
-ExecStart=/usr/bin/python3 /path/to/your/CEX_volume_tracker_B/b_volume_alerts.py
+WorkingDirectory=/root/volume_tracker_binance/b_volume_alerts.py
+ExecStart=/root/volume_tracker_binance/.venv/bin/python /root/volume_tracker_binance/b_volume_alerts.py
 Restart=always # This ensures the script restarts all the time after it finishes its run, it a continuous execution
 StandardOutput=journal
 StandardError=journal
