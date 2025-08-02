@@ -21,9 +21,10 @@ def send_telegram_message(alert_message):
 
     message_text = (
         f"🚨 *Volume Alert - {symbol}* 🚨\n"
-        f"📊 Current Volume: `{curr_volume}`\n"
-        f"📈 Previous 24h Mean Volume: `{prev_volume_mean}`\n"
+        f"📊 Current Volume: `{curr_volume:,}`\n"
+        f"📈 Previous 24h Mean Volume: `{prev_volume_mean:,}`\n"
         f"🔥 Alert Level: *{level}*\n"
+        # URLs should remain as raw URLs and not be converted to Markdown links.
         f"🔗 {chart_url}\n"
         f"🔗 {binance_trade_url}"
     )

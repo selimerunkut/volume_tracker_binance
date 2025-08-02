@@ -53,6 +53,61 @@ This project tracks cryptocurrency volume on Binance and sends alerts based on p
     ```
     The script is configured to run once immediately for testing purposes. For scheduled runs, uncomment the scheduling block in `b_volume_alerts.py`.
 
+## Scheduling with Systemd on Ubuntu
+
+To run the `b_volume_alerts.py` script periodically and manage it as a service on an Ubuntu system, you can use `systemd`. This provides more robust process management, including automatic restarts and better logging.
+
+### 1. Create a Systemd Service File
+
+Create a new file named `binance-volume-tracker.service` in the `/etc/systemd/system/` directory.
+
+```bash
+sudo nano /etc/systemd/system/binance-volume-tracker.service
+```
+
+Add the following content to the file:
+
+```ini
+[Unit]
+Description=Binance Volume Tracker Script
+After=network.target
+
+[Service]
+User=your_username
+WorkingDirectory=/path/to/your/CEX_volume_tracker_B
+ExecStart=/usr/bin/python3 /path/to/your/CEX_volume_tracker_B/b_volume_alerts.py
+Restart=always # This ensures the script restarts all the time after it finishes its run, it a continuous execution
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+```
+*   Replace `your_username` with your actual Ubuntu username.
+*   Replace `/path/to/your/CEX_volume_tracker_B` with the actual absolute path to your project directory.
+*   `ExecStart`: Ensure `/usr/bin/python3` is the correct path to your Python 3 interpreter (you can find it by running `which python3`).
+
+### 2. Reload Systemd and Enable the Service
+
+After creating the service file, reload the systemd daemon to recognize the new service, and then enable and start it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable binance-volume-tracker.service
+sudo systemctl start binance-volume-tracker.service
+```
+
+### 3. Check Service Status and Logs
+
+You can check the status of your service and view its logs using:
+
+```bash
+sudo systemctl status binance-volume-tracker.service
+sudo journalctl -u binance-volume-tracker.service -f
+```
+
+This will set up the script to run as a systemd service, ensuring it restarts on failure and provides centralized logging.
+
 ## Project Structure
 
 -   `b_volume_alerts.py`: Main script for fetching data, calculating alerts, and sending messages.
