@@ -76,7 +76,7 @@ After=network.target
 User=your_username
 WorkingDirectory=/root/volume_tracker_binance/b_volume_alerts.py
 ExecStart=/root/volume_tracker_binance/.venv/bin/python /root/volume_tracker_binance/b_volume_alerts.py
-Restart=always # This ensures the script restarts all the time after it finishes its run, it a continuous execution
+Restart=always
 StandardOutput=journal
 StandardError=journal
 
@@ -86,6 +86,8 @@ WantedBy=multi-user.target
 *   Replace `your_username` with your actual Ubuntu username.
 *   Replace `/path/to/your/CEX_volume_tracker_B` with the actual absolute path to your project directory.
 *   `ExecStart`: Ensure `/usr/bin/python3` is the correct path to your Python 3 interpreter (you can find it by running `which python3`).
+*   `Restart=always`  ensures the script restarts all the time after it finishes its run, it a continuous execution
+
 
 ### 2. Reload Systemd and Enable the Service
 
