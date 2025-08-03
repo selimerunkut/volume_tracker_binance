@@ -48,6 +48,23 @@ def save_alert_state(timestamps):
     except Exception as e:
         print(f"[{datetime.datetime.now()}] Error saving alert state: {e}")
 
+def load_excluded_symbols(file_path='restricted_pairs.json'):
+    """Loads the list of excluded symbols from a JSON file."""
+    try:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+            return set(data.get('excluded_symbols', []))
+    except FileNotFoundError:
+        print(f"[{datetime.datetime.now()}] Restricted pairs file not found. Starting with empty set.")
+        return set()
+    except json.JSONDecodeError as e:
+        print(f"[{datetime.datetime.now()}] Error decoding restricted pairs file: {e}. Starting with empty set.")
+        return set()
+    except Exception as e:
+        print(f"[{datetime.datetime.now()}] An unexpected error occurred while loading restricted pairs: {e}. Starting with empty set.")
+        return set()
+
+
 
 def generate_tradingview_url(symbol):
     # TradingView URL format
@@ -130,8 +147,9 @@ def run_script():
     client = Client(api_key, api_secret)
     
     # Fetch symbols for analysis using the new helper function
-    usdc_pairs = get_filtered_symbols(client, 'USDC')
-    btc_pairs = get_filtered_symbols(client, 'BTC')
+    excluded_symbols = load_excluded_symbols()
+    usdc_pairs = [s for s in get_filtered_symbols(client, 'USDC') if s not in excluded_symbols]
+    btc_pairs = [s for s in get_filtered_symbols(client, 'BTC') if s not in excluded_symbols]
                    
     all_pairs = usdc_pairs + btc_pairs
     
