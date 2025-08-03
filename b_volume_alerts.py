@@ -70,7 +70,13 @@ def run_script():
                 curr_volume = df['volume'].iloc[-2]
                 past_24_hours = df.iloc[:-2]['volume'].astype(float)
                 prev_volume_mean = past_24_hours.mean()
-                print(f"[{datetime.datetime.now()}] {symbol}: Current Volume = {curr_volume}, Previous 24h Mean Volume = {prev_volume_mean}")
+
+                # Calculate last 2-hour and 4-hour volumes
+                # Ensure there are enough data points for these calculations
+                last_2h_volume = df['volume'].iloc[-3:-1].sum() if len(df) >= 3 else 0
+                last_4h_volume = df['volume'].iloc[-5:-1].sum() if len(df) >= 5 else 0
+
+                print(f"[{datetime.datetime.now()}] {symbol}: Current Volume = {curr_volume}, Previous 24h Mean Volume = {prev_volume_mean}, Last 2h Volume = {last_2h_volume}, Last 4h Volume = {last_4h_volume}")
                 
                 alert_details_list = get_volume_alert_details(curr_volume, prev_volume_mean, symbol, '1h', 'BINANCE')
 
@@ -89,6 +95,8 @@ def run_script():
                     'curr_volume': alert_detail['curr_volume'],
                     'prev_volume_mean': alert_detail['prev_volume_mean'],
                     'level': alert_detail['level'],
+                    'last_2h_volume': last_2h_volume,
+                    'last_4h_volume': last_4h_volume,
                     'chart_url': tradingview_url,
                     'binance_trade_url': binance_trade_url
                 }

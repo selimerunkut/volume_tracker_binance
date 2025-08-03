@@ -19,11 +19,15 @@ def send_telegram_message(alert_message):
     level = alert_message['level']
     chart_url = alert_message['chart_url']
     binance_trade_url = alert_message['binance_trade_url']
+    last_2h_volume = int(alert_message['last_2h_volume']) # Format as integer
+    last_4h_volume = int(alert_message['last_4h_volume']) # Format as integer
 
     message_text = (
         f"🚨 *Volume Alert - {symbol}* 🚨\n"
-        f"📊 Current Volume: `{curr_volume:,}`\n"
-        f"📈 Previous 24h Mean Volume: `{prev_volume_mean:,}`\n"
+        f"📊 Current Volume: {curr_volume:,}\n"
+        f"📈 Previous 24h Mean Volume: {prev_volume_mean:,}\n"
+        f"🕒 Last 2h Volume: {last_2h_volume:,}\n"
+        f"🕓 Last 4h Volume: {last_4h_volume:,}\n"
         f"🔥 Alert Level: *{level}*\n"
         f"🔗 {chart_url}\n"
         f"🔗 {binance_trade_url}"
@@ -58,6 +62,8 @@ if __name__ == "__main__":
         'symbol': 'TESTUSDC',
         'curr_volume': 183717.2,
         'prev_volume_mean': 33930.8652173913,
+        'last_2h_volume': 123456, # Example value for testing
+        'last_4h_volume': 789012, # Example value for testing
         'level': 'HIGH',
         'chart_url': 'https://www.tradingview.com/symbols/TESTUSDC/?exchange=BINANCE',
         'binance_trade_url': 'https://www.binance.com/en/trade/TEST_USDC'

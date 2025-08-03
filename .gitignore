@@ -15,3 +15,5 @@ credentials_telegram.json
 .DS_Store
 cex_volume_tracker.egg-info
 uv.lock
+.roo
+.roomodes
