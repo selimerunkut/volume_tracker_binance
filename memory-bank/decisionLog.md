@@ -20,7 +20,7 @@ This file records architectural and implementation decisions using a list format
 *   **Rationale**: `systemd` offers more robust process management, including automatic restarts (`Restart=always`) and centralized logging (`StandardOutput=journal`, `StandardError=journal`), which is superior for a long-running background service.
 *   **Implementation Details**:
     *   A `binance-volume-tracker.service` file was created and configured in `setup_bot_server.sh` to be placed in `/etc/systemd/system/`.
-    *   `ExecStart` path was set to `/root/CEX_volume_tracker_B/.venv/bin/python /root/CEX_volume_tracker_B/b_volume_alerts.py`.
+    *   `ExecStart` path was set to `/root/volume_tracker_binance/.venv/bin/python /root/volume_tracker_binance/b_volume_alerts.py`.
     *   `Restart=always` was explicitly set to ensure continuous execution by restarting the script after each run.
     *   `README.md` was updated with detailed `systemd` setup instructions.
 [2025-08-03 18:04:54] - Decision: Implement duplicate alert message prevention.

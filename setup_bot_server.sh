@@ -60,7 +60,37 @@ sudo systemctl start binance-volume-tracker.service
 
 echo "Binance Volume Tracker systemd service configured and started."
 
-# 8. additional tools
+# 8. Configure systemd service for the Telegram Bot Handler
+echo "Configuring systemd service for the Telegram Bot Handler..."
+sudo bash -c 'cat <<EOF > /etc/systemd/system/telegram-bot-handler.service
+[Unit]
+Description=Telegram Bot Handler Script
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/root/volume_tracker_binance
+ExecStart=/root/volume_tracker_binance/.venv/bin/python /root/volume_tracker_binance/telegram_bot_handler.py
+Restart=always
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF'
+
+# Reload systemd to recognize the new service file
+echo "Reloading systemd daemon..."
+sudo systemctl daemon-reload
+
+# Enable and start the new service
+echo "Enabling and starting telegram-bot-handler.service..."
+sudo systemctl enable telegram-bot-handler.service
+sudo systemctl start telegram-bot-handler.service
+
+echo "Telegram Bot Handler systemd service configured and started."
+
+# 9. additional tools
 # byobu for better terminal management and running multiple sessions on the background
 echo "Installing byobu for terminal management..."
 apt install byobu

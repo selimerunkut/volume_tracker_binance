@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-This document outlines the proposed architecture for integrating a Telegram bot to dynamically manage restricted trading pairs and refactoring the existing `CEX_volume_tracker_B` codebase for improved modularity and maintainability. The goal is to provide a more interactive and user-friendly experience for managing symbol exclusions.
+This document outlines the proposed architecture for integrating a Telegram bot to dynamically manage restricted trading pairs and refactoring the existing `volume_tracker_binance` codebase for improved modularity and maintainability. The goal is to provide a more interactive and user-friendly experience for managing symbol exclusions.
 
 ## 2. Component Diagram
 

@@ -22,8 +22,8 @@ This project tracks cryptocurrency volume on Binance and sends alerts based on p
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/your-repo/CEX_volume_tracker_B.git
-    cd CEX_volume_tracker_B
+    git clone https://github.com/your-repo/volume_tracker_binance.git
+    cd volume_tracker_binance
     ```
 
 2.  **Install dependencies using uv:**
@@ -121,7 +121,7 @@ StandardError=journal
 WantedBy=multi-user.target
 ```
 *   Replace `your_username` with your actual Ubuntu username.
-*   Replace `/path/to/your/CEX_volume_tracker_B` with the actual absolute path to your project directory.
+*   Replace `/path/to/your/volume_tracker_binance` with the actual absolute path to your project directory.
 *   `ExecStart`: Ensure `/usr/bin/python3` is the correct path to your Python 3 interpreter (you can find it by running `which python3`).
 *   `Restart=always`  ensures the script restarts all the time after it finishes its run, it a continuous execution
 

@@ -151,8 +151,8 @@ def run_script():
             response = requests.get(url)
             response.raise_for_status()
             data = response.json()
-            print(f"[{datetime.datetime.now()}] DEBUG: Type of klines data: {type(data)}")
-            print(f"[{datetime.datetime.now()}] DEBUG: Klines data: {data}") # Uncomment for full data inspection if needed
+            #print(f"[{datetime.datetime.now()}] DEBUG: Type of klines data: {type(data)}")
+            #print(f"[{datetime.datetime.now()}] DEBUG: Klines data: {data}") # Uncomment for full data inspection if needed
             df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close", "volume", "close_time", "quote_asset_volume", "number_of_trades", "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
             df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
             df["volume"] = pd.to_numeric(df["volume"])
