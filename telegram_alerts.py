@@ -1,17 +1,31 @@
 # telegram_alerts.py
 import requests
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import json
 import datetime # Import datetime for timestamping error messages
 
+# Load Telegram bot token and chat ID from credentials_b.json
 def load_telegram_credentials():
-    with open('credentials_telegram.json') as f:
-        credentials = json.load(f)
-    return credentials
+    try:
+        with open('credentials_b.json', 'r') as f:
+            credentials = json.load(f)
+            return credentials.get('telegram_bot_token'), credentials.get('telegram_chat_id')
+    except FileNotFoundError:
+        print(f"[{datetime.datetime.now()}] credentials_b.json not found. Please create it with 'telegram_bot_token' and 'telegram_chat_id'.")
+        return None, None
+    except json.JSONDecodeError as e:
+        print(f"[{datetime.datetime.now()}] Error decoding credentials_b.json: {e}")
+        return None, None
 
-def send_telegram_message(alert_message):
-    credentials = load_telegram_credentials()
-    bot_token = credentials['Telegram_bot_token']
-    chat_id = credentials['Telegram_chat_id']
+TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID = load_telegram_credentials()
+
+if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    print(f"[{datetime.datetime.now()}] Telegram bot token or chat ID not found. Alerts will not be sent.")
+
+def send_telegram_message(alert_message, include_restrict_button=False):
+    # Use the globally loaded TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
+    bot_token = TELEGRAM_BOT_TOKEN
+    chat_id = TELEGRAM_CHAT_ID
 
     symbol = alert_message['symbol']
     curr_volume = int(alert_message['curr_volume']) # Format as integer
@@ -33,10 +47,22 @@ def send_telegram_message(alert_message):
         f"🔗 {binance_trade_url}"
     )
 
-    send_text = f'https://api.telegram.org/bot{bot_token}/sendMessage?chat_id={chat_id}&parse_mode=HTML&text={message_text}&disable_web_page_preview=True'
+    url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
+    
+    payload = {
+        'chat_id': TELEGRAM_CHAT_ID,
+        'text': message_text,
+        'parse_mode': 'HTML',
+        'disable_web_page_preview': True
+    }
+
+    if include_restrict_button and symbol:
+        keyboard = [[InlineKeyboardButton(f"Restrict {symbol}", callback_data=f"restrict_{symbol}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard).to_json()
+        payload['reply_markup'] = reply_markup
     
     try:
-        response = requests.get(send_text)
+        response = requests.post(url, json=payload)
         response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
         response_json = response.json()
         if response_json.get("ok"):

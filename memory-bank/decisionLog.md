@@ -36,3 +36,10 @@ Implementation Details:
     - Load the state from the file at script startup.
     - Save the state to the file after each alert is sent.
     - Implement error handling for file operations (read/write).
+[2025-08-03 20:36:45] - **Decision:** Introduce a Telegram bot for dynamic management of restricted trading pairs and refactor the existing codebase for improved structure and maintainability.
+**Rationale:** The previous static `restricted_pairs.json` file required manual updates. A Telegram bot will provide a more interactive and user-friendly way to manage excluded pairs directly from the chat interface, including restricting via inline buttons, listing, and un-restricting via commands. Refactoring is necessary to accommodate the new bot functionality and improve overall code organization.
+**Implementation Details:**
+- A new Python module (e.g., `telegram_bot_handler.py`) will be created to handle Telegram bot interactions (commands and callbacks).
+- `telegram_alerts.py` will be modified to support sending inline keyboard buttons with alert messages.
+- `b_volume_alerts.py` will be refactored to separate concerns, potentially introducing a `SymbolManager` class or similar to handle loading and filtering symbols, which the bot can also interact with.
+- `restricted_pairs.json` will continue to store the excluded symbols, but its management will be automated via the bot.

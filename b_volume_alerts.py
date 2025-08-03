@@ -1,5 +1,6 @@
 import requests
 import json
+from symbol_manager import SymbolManager
 import pandas as pd
 from binance.client import Client
 import datetime
@@ -47,23 +48,6 @@ def save_alert_state(timestamps):
         print(f"[{datetime.datetime.now()}] Saved alert state to {STATE_FILE}.")
     except Exception as e:
         print(f"[{datetime.datetime.now()}] Error saving alert state: {e}")
-
-def load_excluded_symbols(file_path='restricted_pairs.json'):
-    """Loads the list of excluded symbols from a JSON file."""
-    try:
-        with open(file_path, 'r') as f:
-            data = json.load(f)
-            return set(data.get('excluded_symbols', []))
-    except FileNotFoundError:
-        print(f"[{datetime.datetime.now()}] Restricted pairs file not found. Starting with empty set.")
-        return set()
-    except json.JSONDecodeError as e:
-        print(f"[{datetime.datetime.now()}] Error decoding restricted pairs file: {e}. Starting with empty set.")
-        return set()
-    except Exception as e:
-        print(f"[{datetime.datetime.now()}] An unexpected error occurred while loading restricted pairs: {e}. Starting with empty set.")
-        return set()
-
 
 
 def generate_tradingview_url(symbol):
@@ -147,7 +131,9 @@ def run_script():
     client = Client(api_key, api_secret)
     
     # Fetch symbols for analysis using the new helper function
-    excluded_symbols = load_excluded_symbols()
+    symbol_manager = SymbolManager()
+    excluded_symbols = symbol_manager.get_excluded_symbols()
+
     usdc_pairs = [s for s in get_filtered_symbols(client, 'USDC') if s not in excluded_symbols]
     btc_pairs = [s for s in get_filtered_symbols(client, 'BTC') if s not in excluded_symbols]
                    
@@ -165,6 +151,8 @@ def run_script():
             response = requests.get(url)
             response.raise_for_status()
             data = response.json()
+            print(f"[{datetime.datetime.now()}] DEBUG: Type of klines data: {type(data)}")
+            print(f"[{datetime.datetime.now()}] DEBUG: Klines data: {data}") # Uncomment for full data inspection if needed
             df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close", "volume", "close_time", "quote_asset_volume", "number_of_trades", "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
             df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
             df["volume"] = pd.to_numeric(df["volume"])
@@ -199,7 +187,7 @@ def run_script():
                 else: # Only proceed if it's NOT a duplicate
                     alert_message = create_alert_message(alert_detail, last_2h_volume, last_4h_volume, symbol)
                     print(f"[{datetime.datetime.now()}] Sending Telegram message for {symbol} (Level: {level})...")
-                    if send_telegram_message(alert_message):
+                    if send_telegram_message(alert_message, include_restrict_button=True):
                         # Update the timestamp for this alert and save the state
                         time.sleep(1)
                         last_alert_timestamps[(symbol, level)] = datetime.datetime.now()

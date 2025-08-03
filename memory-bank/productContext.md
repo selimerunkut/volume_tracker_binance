@@ -24,3 +24,4 @@ This file provides a high-level overview of the project and the expected product
 *   **Configuration**: API keys and chat IDs are stored in `credentials_b.json` and `credentials_telegram.json` (ignored by Git).
 *   **Execution Environment**: Designed to run as a `systemd` service on Linux (e.g., Ubuntu) for background operation, automatic restarts, and centralized logging.
 *   **External APIs**: Interacts with Binance API for market data and Telegram Bot API for sending alerts.
+[2025-08-03 20:36:35] - Added new features: Telegram bot integration for dynamic management of restricted trading pairs (restrict via button, list via command, unrestrict via command). Refactoring of existing code for better structure and maintainability.

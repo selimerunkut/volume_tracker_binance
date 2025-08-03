@@ -13,6 +13,10 @@ This project tracks cryptocurrency volume on Binance and sends alerts based on p
     - Alert level
     - Links to TradingView chart
     - Links to Binance trade page
+- Allows dynamic management of restricted trading pairs via Telegram bot:
+    - Restrict a pair directly from an alert message using an inline button.
+    - List all currently restricted pairs using a bot command.
+    - Unrestrict a specific pair using a bot command.
 
 ## Setup
 
@@ -29,29 +33,62 @@ This project tracks cryptocurrency volume on Binance and sends alerts based on p
     (Note: Dependencies are managed via `pyproject.toml`.)
 
 3.  **Configure Credentials:**
-    Create `credentials_b.json` and `credentials_telegram.json` in the project root directory.
+    Create `credentials_b.json` in the project root directory. This file will store both your Binance API credentials and Telegram bot credentials.
 
     `credentials_b.json`:
     ```json
     {
       "Binance_api_key": "YOUR_BINANCE_API_KEY",
-      "Binance_secret_key": "YOUR_BINANCE_SECRET_KEY"
+      "Binance_secret_key": "YOUR_BINANCE_SECRET_KEY",
+      "telegram_bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+      "telegram_chat_id": "YOUR_TELEGRAM_CHAT_ID"
     }
     ```
+    **Important:** Ensure the keys for Telegram credentials are exactly `telegram_bot_token` and `telegram_chat_id` (lowercase 't').
 
-    `credentials_telegram.json`:
-    ```json
-    {
-      "Telegram_bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
-      "Telegram_chat_id": "YOUR_TELEGRAM_CHAT_ID"
-    }
+4.  **Run the Application:**
+    The application consists of two main components that should be run concurrently in separate terminals:
+
+    a.  **Run the Telegram Bot Handler:**
+        Open a new terminal and run:
+        ```bash
+        python telegram_bot_handler.py
+        ```
+        This will start your Telegram bot, which will listen for commands and handle inline button interactions.
+
+    b.  **Run the Volume Alert Script:**
+        Open another terminal and run:
+        ```bash
+        python b_volume_alerts.py
+        ```
+        This script will fetch data, calculate alerts, and send them to your Telegram chat. Alerts will now include an inline button to "Restrict [SYMBOL]".
+
+## Telegram Bot Commands
+
+The Telegram bot provides the following commands for managing restricted trading pairs:
+
+*   `/help` - Show a list of available commands.
+    ```
+    Available commands:
+    /start - Start the bot
+    /help - Show this help message
+    /list_restricted - List all restricted trading pairs
+    /unrestrict <SYMBOL> - Unrestrict a specific trading pair (e.g., /unrestrict MATICBTC)
     ```
 
-4.  **Run the script:**
-    ```bash
-    python b_volume_alerts.py
+*   `/list_restricted` - List all currently restricted trading pairs.
     ```
-    The script is configured to run once immediately for testing purposes. For scheduled runs, uncomment the scheduling block in `b_volume_alerts.py`.
+    Restricted pairs:
+    BATUSDC
+    ELFBTC
+    MATICBTC
+    SNTBTC
+    ```
+
+*   `/unrestrict <SYMBOL>` - Unrestrict a specific trading pair. Replace `<SYMBOL>` with the actual trading pair (e.g., `/unrestrict ELFBTC`).
+    ```
+    Successfully unrestricted ELFBTC.
+    ```
 
 ## Scheduling with Systemd on Ubuntu
 
@@ -114,9 +151,10 @@ This will set up the script to run as a systemd service, ensuring it restarts on
 
 -   `b_volume_alerts.py`: Main script for fetching data, calculating alerts, and sending messages.
 -   `alert_levels_tg.py`: Defines logic for volume alert levels.
--   `telegram_alerts.py`: Handles sending messages to Telegram.
--   `credentials_b.json`: Stores Binance API credentials (ignored by `.gitignore`).
--   `credentials_telegram.json`: Stores Telegram bot credentials (ignored by `.gitignore`).
+-   `telegram_alerts.py`: Handles sending messages to Telegram, now with inline button support.
+-   `symbol_manager.py`: Manages the loading, saving, adding, and removing of restricted trading pairs.
+-   `telegram_bot_handler.py`: Handles all Telegram bot commands and callback queries for dynamic pair management.
+-   `credentials_b.json`: Stores Binance API credentials and Telegram bot credentials (ignored by `.gitignore`).
 -   `.gitignore`: Specifies files and directories to be ignored by Git.
 -   `memory-bank/`: Contains project documentation and changelog.
 

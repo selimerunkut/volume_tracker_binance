@@ -1,6 +1,10 @@
 {
     "excluded_symbols": [
+        "FXSBTC",
+        "SNTBTC",
+        "FIROBTC",
         "MATICBTC",
-        "BATUSDC"
+        "BATUSDC",
+        "NUBTC"
     ]
 }
