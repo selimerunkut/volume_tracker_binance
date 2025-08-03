@@ -8,6 +8,46 @@ import time
 from alert_levels_tg import get_volume_alert_details
 from telegram_alerts import send_telegram_message  # Import the Telegram alert function
 
+# File to store the state of sent alerts
+STATE_FILE = 'alert_state.json'
+COOLDOWN_PERIOD_HOURS = 4 # Cooldown period in hours to prevent duplicate alerts
+
+def load_alert_state():
+    """Loads the last_alert_timestamps from a JSON file."""
+    try:
+        with open(STATE_FILE, 'r') as f:
+            state = json.load(f)
+            # Convert string timestamps back to datetime objects
+            loaded_timestamps = {}
+            for key_str, timestamp_str in state.items():
+                symbol, level = key_str.split('___') # Use a unique separator
+                loaded_timestamps[(symbol, level)] = datetime.datetime.fromisoformat(timestamp_str)
+            print(f"[{datetime.datetime.now()}] Loaded alert state from {STATE_FILE}.")
+            return loaded_timestamps
+    except FileNotFoundError:
+        print(f"[{datetime.datetime.now()}] Alert state file not found. Starting with empty state.")
+        return {}
+    except json.JSONDecodeError as e:
+        print(f"[{datetime.datetime.now()}] Error decoding alert state file: {e}. Starting with empty state.")
+        return {}
+    except Exception as e:
+        print(f"[{datetime.datetime.now()}] An unexpected error occurred while loading alert state: {e}. Starting with empty state.")
+        return {}
+
+def save_alert_state(timestamps):
+    """Saves the last_alert_timestamps to a JSON file."""
+    try:
+        # Convert datetime objects to string timestamps for JSON serialization
+        serializable_timestamps = {
+            f"{symbol}___{level}": timestamp.isoformat()
+            for (symbol, level), timestamp in timestamps.items()
+        }
+        with open(STATE_FILE, 'w') as f:
+            json.dump(serializable_timestamps, f, indent=4)
+        print(f"[{datetime.datetime.now()}] Saved alert state to {STATE_FILE}.")
+    except Exception as e:
+        print(f"[{datetime.datetime.now()}] Error saving alert state: {e}")
+
 
 def generate_tradingview_url(symbol):
     # TradingView URL format
@@ -26,7 +66,61 @@ def generate_binance_trade_url(symbol):
         return f"https://www.binance.com/en/trade/{base_asset}_BTC"
     return f"https://www.binance.com/en/trade/{symbol}"
 
+def create_alert_message(alert_detail, last_2h_volume, last_4h_volume, symbol):
+   """
+   Constructs the alert message dictionary.
+   """
+   tradingview_url = generate_tradingview_url(symbol)
+   binance_trade_url = generate_binance_trade_url(symbol)
+
+   return {
+       'exchange': 'BINANCE',
+       'symbol': symbol,
+       'curr_volume': alert_detail['curr_volume'],
+       'prev_volume_mean': alert_detail['prev_volume_mean'],
+       'level': alert_detail['level'],
+       'last_2h_volume': last_2h_volume,
+       'last_4h_volume': last_4h_volume,
+       'chart_url': tradingview_url,
+       'binance_trade_url': binance_trade_url
+   }
+
+def is_duplicate_alert(symbol, level):
+    """
+    Checks if an alert for the given symbol and level was sent within the cooldown period.
+    """
+    key = (symbol, level)
+    print(f"[{datetime.datetime.now()}] DEBUG: Checking for duplicate alert for key: {key}")
+    if key in last_alert_timestamps:
+        last_sent_time = last_alert_timestamps[key]
+        time_since_last_alert = datetime.datetime.now() - last_sent_time
+        print(f"[{datetime.datetime.now()}] DEBUG: Last sent time for {key}: {last_sent_time}, Time since: {time_since_last_alert}")
+        if time_since_last_alert < datetime.timedelta(hours=COOLDOWN_PERIOD_HOURS):
+            print(f"[{datetime.datetime.now()}] DEBUG: Duplicate alert detected for {key}. Skipping.")
+            return True
+    print(f"[{datetime.datetime.now()}] DEBUG: No duplicate alert detected for {key}. Proceeding.")
+    return False
+
+def get_filtered_symbols(client, quote_asset):
+    """
+    Fetches all symbols from Binance and filters them by quote asset,
+    excluding leveraged tokens.
+    """
+    symbols = client.get_exchange_info()['symbols']
+    filtered_pairs = [
+        s['symbol'] for s in symbols
+        if (s['quoteAsset'] == quote_asset)
+        and 'UP' not in s['symbol']
+        and 'DOWN' not in s['symbol']
+        and 'BEAR' not in s['symbol']
+        and 'BULL' not in s['symbol']
+    ]
+    return filtered_pairs
+
 def run_script():
+    # Load the persistent alert state at the beginning of the script run
+    global last_alert_timestamps
+    last_alert_timestamps = load_alert_state()
     print(f"[{datetime.datetime.now()}] Starting run_script...")
     # Load Binance credentials
     with open('credentials_b.json') as f:
@@ -35,18 +129,9 @@ def run_script():
     api_secret = credentials['Binance_secret_key']
     client = Client(api_key, api_secret)
     
-    # Fetch symbols for analysis
-    # Define specific symbols for testing
-    # Note: Binance symbols typically do not use underscores (e.g., SAHARUSDC, SOPHUSDC, HEIUSDC)
-    #usdc_pairs = ["SAHAR_USDC", "SOPH_USDC", "HEI_USDC"] # Example pairs provided by user
-    # If you want to revert to fetching all USDC pairs, uncomment the lines below
-    symbols = client.get_exchange_info()['symbols']
-    
-    usdc_pairs = [s['symbol'] for s in symbols if (s['quoteAsset'] == 'USDC') and 'UPUSDC' not in s['symbol']
-                   and 'DOWNUSDC' not in s['symbol'] and 'BEARUSDC' not in s['symbol'] and 'BULLUSDC' not in s['symbol']]
-    
-    btc_pairs = [s['symbol'] for s in symbols if (s['quoteAsset'] == 'BTC') and 'UPBTC' not in s['symbol']
-                   and 'DOWNBTC' not in s['symbol'] and 'BEARBTC' not in s['symbol'] and 'BULLBTC' not in s['symbol']]
+    # Fetch symbols for analysis using the new helper function
+    usdc_pairs = get_filtered_symbols(client, 'USDC')
+    btc_pairs = get_filtered_symbols(client, 'BTC')
                    
     all_pairs = usdc_pairs + btc_pairs
     
@@ -86,22 +171,23 @@ def run_script():
                     print(f"[{datetime.datetime.now()}] No alerts for {symbol}.")
                     
             for alert_detail in alert_details_list:
-                tradingview_url = generate_tradingview_url(alert_detail['symbol'])
-                binance_trade_url = generate_binance_trade_url(alert_detail['symbol'])
+                symbol = alert_detail['symbol']
+                level = alert_detail['level']
 
-                alert_message = {
-                    'exchange': 'BINANCE',
-                    'symbol': alert_detail['symbol'],
-                    'curr_volume': alert_detail['curr_volume'],
-                    'prev_volume_mean': alert_detail['prev_volume_mean'],
-                    'level': alert_detail['level'],
-                    'last_2h_volume': last_2h_volume,
-                    'last_4h_volume': last_4h_volume,
-                    'chart_url': tradingview_url,
-                    'binance_trade_url': binance_trade_url
-                }
-                print(f"[{datetime.datetime.now()}] Sending Telegram message for {symbol} (Level: {alert_detail['level']})...")
-                send_telegram_message(alert_message)
+                if is_duplicate_alert(symbol, level):
+                    # The DEBUG print inside is_duplicate_alert is sufficient
+                    continue # Skip sending this alert
+
+                else: # Only proceed if it's NOT a duplicate
+                    alert_message = create_alert_message(alert_detail, last_2h_volume, last_4h_volume, symbol)
+                    print(f"[{datetime.datetime.now()}] Sending Telegram message for {symbol} (Level: {level})...")
+                    if send_telegram_message(alert_message):
+                        # Update the timestamp for this alert and save the state
+                        time.sleep(1)
+                        last_alert_timestamps[(symbol, level)] = datetime.datetime.now()
+                        print(f"[{datetime.datetime.now()}] DEBUG: Alert sent and timestamp updated for {symbol} (Level: {level}).")
+                        save_alert_state(last_alert_timestamps)
+                    
 
         except requests.exceptions.RequestException as e:
             print(f"[{datetime.datetime.now()}] Error fetching data for {symbol}: {e}")

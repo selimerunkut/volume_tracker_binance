@@ -23,3 +23,16 @@ This file records architectural and implementation decisions using a list format
     *   `ExecStart` path was set to `/root/CEX_volume_tracker_B/.venv/bin/python /root/CEX_volume_tracker_B/b_volume_alerts.py`.
     *   `Restart=always` was explicitly set to ensure continuous execution by restarting the script after each run.
     *   `README.md` was updated with detailed `systemd` setup instructions.
+[2025-08-03 18:04:54] - Decision: Implement duplicate alert message prevention.
+Rationale: User feedback indicates duplicate alerts for the same volume increase are being sent, leading to spam. A simple solution is preferred.
+Implementation Details:
+    - Use an in-memory dictionary to track recently sent alerts (symbol, alert level, timestamp).
+    - Implement a cooldown period (e.g., 4 hours) to prevent re-sending the same alert within that timeframe.
+    - This approach is simple and avoids new dependencies, though it will not persist across script restarts.
+[2025-08-03 18:08:31] - Decision: Revise duplicate alert message prevention to use file-based persistence.
+Rationale: The previous in-memory solution is not suitable for a script managed by `systemd` with `Restart=always`, as the in-memory state is lost upon script exit and restart, leading to duplicate alerts.
+Implementation Details:
+    - Store `last_alert_timestamps` in a JSON file to persist state across script restarts.
+    - Load the state from the file at script startup.
+    - Save the state to the file after each alert is sent.
+    - Implement error handling for file operations (read/write).
