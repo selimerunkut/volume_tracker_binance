@@ -43,3 +43,9 @@ Implementation Details:
 - `telegram_alerts.py` will be modified to support sending inline keyboard buttons with alert messages.
 - `b_volume_alerts.py` will be refactored to separate concerns, potentially introducing a `SymbolManager` class or similar to handle loading and filtering symbols, which the bot can also interact with.
 - `restricted_pairs.json` will continue to store the excluded symbols, but its management will be automated via the bot.
+[2025-08-06 14:09:00] - Decision: Filter volume alerts to only trigger on "bullish" candles.
+Rationale: User feedback indicated that alerts were being triggered for high volume on downward price movements ("bearish" candles), which is not desired. The goal is to focus on volume surges that accompany upward price movements.
+Implementation Details:
+    - Modified `b_volume_alerts.py` to extract `open` and `close` prices of the current candle.
+    - Passed `open_price` and `close_price` to `get_volume_alert_details` in `alert_levels_tg.py`.
+    - Added a condition `close_price > open_price` in `get_volume_alert_details` to ensure alerts are only generated for candles where the closing price is higher than the opening price.

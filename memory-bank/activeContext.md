@@ -23,3 +23,4 @@ This file tracks the project's current status, including recent changes, current
 
 *   **Binance API Geographical Restriction**: The script encounters `BinanceAPIException: APIError(code=0): Service unavailable from a restricted location` when run from certain IP addresses (e.g., DigitalOcean **USA** servers). Solution is to run the script from europena IP addresses
 *   **Systemd Service Monitoring**: While `Restart=always` is configured, continuous monitoring of `journalctl` logs is needed to ensure the service is consistently restarting and running as expected, especially after initial setup.
+[2025-08-06 14:09:00] - Implemented filtering for "bullish" volume in alerts.

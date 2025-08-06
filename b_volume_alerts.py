@@ -1,5 +1,6 @@
 import requests
 import json
+import sys # Import sys to access command-line arguments
 from symbol_manager import SymbolManager
 import pandas as pd
 from binance.client import Client
@@ -11,7 +12,7 @@ from telegram_alerts import send_telegram_message  # Import the Telegram alert f
 
 # File to store the state of sent alerts
 STATE_FILE = 'alert_state.json'
-COOLDOWN_PERIOD_HOURS = 4 # Cooldown period in hours to prevent duplicate alerts
+COOLDOWN_PERIOD_HOURS = 1 # Cooldown period in hours to prevent duplicate alerts
 
 def load_alert_state():
     """Loads the last_alert_timestamps from a JSON file."""
@@ -20,9 +21,12 @@ def load_alert_state():
             state = json.load(f)
             # Convert string timestamps back to datetime objects
             loaded_timestamps = {}
-            for key_str, timestamp_str in state.items():
-                symbol, level = key_str.split('___') # Use a unique separator
-                loaded_timestamps[(symbol, level)] = datetime.datetime.fromisoformat(timestamp_str)
+            for key_str, alert_data in state.items():
+                symbol, level = key_str.split('___')
+                loaded_timestamps[(symbol, level)] = {
+                    'timestamp': datetime.datetime.fromisoformat(alert_data['timestamp']),
+                    'volume': float(alert_data['volume'])
+                }
             print(f"[{datetime.datetime.now()}] Loaded alert state from {STATE_FILE}.")
             return loaded_timestamps
     except FileNotFoundError:
@@ -40,8 +44,11 @@ def save_alert_state(timestamps):
     try:
         # Convert datetime objects to string timestamps for JSON serialization
         serializable_timestamps = {
-            f"{symbol}___{level}": timestamp.isoformat()
-            for (symbol, level), timestamp in timestamps.items()
+            f"{symbol}___{level}": {
+                'timestamp': data['timestamp'].isoformat(),
+                'volume': data['volume']
+            }
+            for (symbol, level), data in timestamps.items()
         }
         with open(STATE_FILE, 'w') as f:
             json.dump(serializable_timestamps, f, indent=4)
@@ -67,7 +74,7 @@ def generate_binance_trade_url(symbol):
         return f"https://www.binance.com/en/trade/{base_asset}_BTC"
     return f"https://www.binance.com/en/trade/{symbol}"
 
-def create_alert_message(alert_detail, last_2h_volume, last_4h_volume, symbol):
+def create_alert_message(alert_detail, last_2h_volume, last_4h_volume, last_completed_hour_volume, symbol):
    """
    Constructs the alert message dictionary.
    """
@@ -82,24 +89,38 @@ def create_alert_message(alert_detail, last_2h_volume, last_4h_volume, symbol):
        'level': alert_detail['level'],
        'last_2h_volume': last_2h_volume,
        'last_4h_volume': last_4h_volume,
+       'last_1h_volume': last_completed_hour_volume, # Add last 1h volume
        'chart_url': tradingview_url,
        'binance_trade_url': binance_trade_url
    }
 
-def is_duplicate_alert(symbol, level):
+def is_duplicate_alert(symbol, level, curr_volume):
     """
-    Checks if an alert for the given symbol and level was sent within the cooldown period.
+    Checks if an alert for the given symbol and level was sent within the cooldown period,
+    and if the current volume is not a significant new surge.
     """
     key = (symbol, level)
     print(f"[{datetime.datetime.now()}] DEBUG: Checking for duplicate alert for key: {key}")
     if key in last_alert_timestamps:
-        last_sent_time = last_alert_timestamps[key]
+        alert_data = last_alert_timestamps[key]
+        last_sent_time = alert_data['timestamp']
+        last_sent_volume = alert_data['volume']
         time_since_last_alert = datetime.datetime.now() - last_sent_time
-        print(f"[{datetime.datetime.now()}] DEBUG: Last sent time for {key}: {last_sent_time}, Time since: {time_since_last_alert}")
+        print(f"[{datetime.datetime.now()}] DEBUG: Last sent time for {key}: {last_sent_time}, Last sent volume: {last_sent_volume}, Time since: {time_since_last_alert}")
+
         if time_since_last_alert < datetime.timedelta(hours=COOLDOWN_PERIOD_HOURS):
-            print(f"[{datetime.datetime.now()}] DEBUG: Duplicate alert detected for {key}. Skipping.")
-            return True
-    print(f"[{datetime.datetime.now()}] DEBUG: No duplicate alert detected for {key}. Proceeding.")
+            # If within cooldown, check if current volume is significantly higher than the last sent volume
+            # Define "significantly higher" as 10% for now, this can be adjusted
+            if curr_volume <= last_sent_volume * 1.10:
+                print(f"[{datetime.datetime.now()}] DEBUG: Duplicate alert detected for {key} (within cooldown and not significantly higher volume). Skipping.")
+                return True
+            else:
+                print(f"[{datetime.datetime.now()}] DEBUG: New surge detected for {key} (volume significantly higher). Proceeding despite cooldown.")
+                return False # Not a duplicate, proceed
+        else:
+            print(f"[{datetime.datetime.now()}] DEBUG: Cooldown period expired for {key}. Proceeding.")
+            return False # Cooldown expired, proceed
+    print(f"[{datetime.datetime.now()}] DEBUG: No previous alert detected for {key}. Proceeding.")
     return False
 
 def get_filtered_symbols(client, quote_asset):
@@ -118,7 +139,7 @@ def get_filtered_symbols(client, quote_asset):
     ]
     return filtered_pairs
 
-def run_script():
+def run_script(dry_run=False):
     # Load the persistent alert state at the beginning of the script run
     global last_alert_timestamps
     last_alert_timestamps = load_alert_state()
@@ -143,8 +164,8 @@ def run_script():
     
     for symbol in all_pairs:
         interval = '1h'
-        limit = 25 # This specifies the number of historical klines (candlesticks) to fetch from the Binance API.
-                   # A limit of 25 for '1h' interval means it fetches the last 25 hours of data.
+        limit = 10 # Fetch enough data for current volume and a 6-hour mean (last 7 candles)
+                   # A limit of 10 for '1h' interval means it fetches the last 10 hours of data.
         url = f'https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}'
         print(f"[{datetime.datetime.now()}] Fetching data for {symbol}...")
         try:
@@ -158,18 +179,24 @@ def run_script():
             df["volume"] = pd.to_numeric(df["volume"])
             
             if len(df) > 2:
-                curr_volume = df['volume'].iloc[-2]
-                past_24_hours = df.iloc[:-2]['volume'].astype(float)
-                prev_volume_mean = past_24_hours.mean()
+                # Current volume is the volume of the currently forming candle
+                curr_volume = df['volume'].iloc[-1]
+                # Volume of the last completed hour
+                last_completed_hour_volume = df['volume'].iloc[-2]
+                # Calculate the mean of the 6 hours before the last completed hour
+                # This means taking candles from index -8 up to (but not including) -2
+                prev_volume_mean = df['volume'].iloc[-8:-2].mean()
 
                 # Calculate last 2-hour and 4-hour volumes
                 # Ensure there are enough data points for these calculations
                 last_2h_volume = df['volume'].iloc[-3:-1].sum() if len(df) >= 3 else 0
                 last_4h_volume = df['volume'].iloc[-5:-1].sum() if len(df) >= 5 else 0
 
-                print(f"[{datetime.datetime.now()}] {symbol}: Current Volume = {curr_volume}, Previous 24h Mean Volume = {prev_volume_mean}, Last 2h Volume = {last_2h_volume}, Last 4h Volume = {last_4h_volume}")
+                print(f"[{datetime.datetime.now()}] {symbol}: Current Volume = {curr_volume}, Previous 6h Mean Volume = {prev_volume_mean}, Last 2h Volume = {last_2h_volume}, Last 4h Volume = {last_4h_volume}")
                 
-                alert_details_list = get_volume_alert_details(curr_volume, prev_volume_mean, symbol, '1h', 'BINANCE')
+                open_price = df['open'].iloc[-1]
+                close_price = df['close'].iloc[-1]
+                alert_details_list = get_volume_alert_details(curr_volume, prev_volume_mean, last_completed_hour_volume, open_price, close_price, symbol, '1h', 'BINANCE')
 
                 if alert_details_list:
                     print(f"[{datetime.datetime.now()}] Alerts generated for {symbol}: {len(alert_details_list)}")
@@ -180,19 +207,25 @@ def run_script():
                 symbol = alert_detail['symbol']
                 level = alert_detail['level']
 
-                if is_duplicate_alert(symbol, level):
+                if is_duplicate_alert(symbol, level, curr_volume):
                     # The DEBUG print inside is_duplicate_alert is sufficient
                     continue # Skip sending this alert
 
                 else: # Only proceed if it's NOT a duplicate
-                    alert_message = create_alert_message(alert_detail, last_2h_volume, last_4h_volume, symbol)
+                    alert_message = create_alert_message(alert_detail, last_2h_volume, last_4h_volume, last_completed_hour_volume, symbol)
                     print(f"[{datetime.datetime.now()}] Sending Telegram message for {symbol} (Level: {level})...")
-                    if send_telegram_message(alert_message, include_restrict_button=True):
-                        # Update the timestamp for this alert and save the state
-                        time.sleep(1)
-                        last_alert_timestamps[(symbol, level)] = datetime.datetime.now()
-                        print(f"[{datetime.datetime.now()}] DEBUG: Alert sent and timestamp updated for {symbol} (Level: {level}).")
-                        save_alert_state(last_alert_timestamps)
+                    if dry_run:
+                        print(f"[{datetime.datetime.now()}] DRY RUN: Telegram message would have been sent for {symbol} (Level: {level}). Message details: {alert_message}")
+                    else:
+                        if send_telegram_message(alert_message, include_restrict_button=True):
+                            # Update the timestamp for this alert and save the state
+                            time.sleep(1)
+                            last_alert_timestamps[(symbol, level)] = {
+                                'timestamp': datetime.datetime.now(),
+                                'volume': curr_volume
+                            }
+                            print(f"[{datetime.datetime.now()}] DEBUG: Alert sent and timestamp updated for {symbol} (Level: {level}).")
+                            save_alert_state(last_alert_timestamps)
                     
 
         except requests.exceptions.RequestException as e:
@@ -214,6 +247,9 @@ def run_script():
 #     time.sleep(1)
 
 if __name__ == "__main__":
-    # This block will run the script once immediately for testing purposes.
-    # You can remove this block after successful testing.
-    run_script()
+    # Check for a dry-run argument
+    is_dry_run = '--dry-run' in sys.argv
+    if is_dry_run:
+        print(f"[{datetime.datetime.now()}] Running in DRY-RUN mode. Telegram messages will not be sent.")
+    
+    run_script(dry_run=is_dry_run)

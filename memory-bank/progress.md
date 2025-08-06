@@ -25,3 +25,4 @@ This file tracks the project's progress using a task list format.
 *   Address Binance API geographical restriction (if user provides proxy details).
 *   Continue monitoring `systemd` service logs for long-term stability.
 *   Further enhancements to alert logic or features as requested.
+[2025-08-06 14:09:00] - Implemented bullish volume filtering.

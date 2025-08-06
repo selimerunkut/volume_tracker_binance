@@ -25,3 +25,9 @@ This file provides a high-level overview of the project and the expected product
 *   **Execution Environment**: Designed to run as a `systemd` service on Linux (e.g., Ubuntu) for background operation, automatic restarts, and centralized logging.
 *   **External APIs**: Interacts with Binance API for market data and Telegram Bot API for sending alerts.
 [2025-08-03 20:36:35] - Added new features: Telegram bot integration for dynamic management of restricted trading pairs (restrict via button, list via command, unrestrict via command). Refactoring of existing code for better structure and maintainability.
+
+## Future Enhancements
+
+*   **Improved Volume Surge Calculation**:
+    *   Consider using Weighted Moving Average (WMA) or Exponential Moving Average (EMA) for `prev_volume_mean` to provide a more responsive and robust baseline.
+    *   Explore Volume Profile Analysis to compare current volume against typical volume distribution for specific times of day, offering more nuanced surge detection.

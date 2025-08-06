@@ -35,11 +35,13 @@ def send_telegram_message(alert_message, include_restrict_button=False):
     binance_trade_url = alert_message['binance_trade_url']
     last_2h_volume = int(alert_message['last_2h_volume']) # Format as integer
     last_4h_volume = int(alert_message['last_4h_volume']) # Format as integer
+    last_1h_volume = int(alert_message['last_1h_volume']) # Format as integer
 
     message_text = (
         f"🚨 *Volume Alert - {symbol}* 🚨\n"
         f"📊 Current Volume: {curr_volume:,}\n"
-        f"📈 Previous 24h Mean Volume: {prev_volume_mean:,}\n"
+        f"📈 Previous 6h Mean Volume: {prev_volume_mean:,}\n"
+        f"🕐 Last 1h Volume: {last_1h_volume:,}\n" # Add last 1h volume
         f"🕒 Last 2h Volume: {last_2h_volume:,}\n"
         f"🕓 Last 4h Volume: {last_4h_volume:,}\n"
         f"🔥 Alert Level: *{level}*\n"
@@ -88,6 +90,7 @@ if __name__ == "__main__":
         'symbol': 'TESTUSDC',
         'curr_volume': 183717.2,
         'prev_volume_mean': 33930.8652173913,
+        'last_1h_volume': 99999, # Example value for testing
         'last_2h_volume': 123456, # Example value for testing
         'last_4h_volume': 789012, # Example value for testing
         'level': 'HIGH',
