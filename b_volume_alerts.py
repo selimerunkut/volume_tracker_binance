@@ -74,7 +74,7 @@ def generate_binance_trade_url(symbol):
         return f"https://www.binance.com/en/trade/{base_asset}_BTC"
     return f"https://www.binance.com/en/trade/{symbol}"
 
-def create_alert_message(alert_detail, last_2h_volume, last_4h_volume, last_completed_hour_volume, symbol):
+def create_alert_message(alert_detail, last_2h_volume, last_4h_volume, last_completed_hour_volume, open_price, close_price, symbol):
    """
    Constructs the alert message dictionary.
    """
@@ -90,6 +90,8 @@ def create_alert_message(alert_detail, last_2h_volume, last_4h_volume, last_comp
        'last_2h_volume': last_2h_volume,
        'last_4h_volume': last_4h_volume,
        'last_1h_volume': last_completed_hour_volume, # Add last 1h volume
+       'open_price': open_price,
+       'close_price': close_price,
        'chart_url': tradingview_url,
        'binance_trade_url': binance_trade_url
    }
@@ -212,7 +214,7 @@ def run_script(dry_run=False):
                     continue # Skip sending this alert
 
                 else: # Only proceed if it's NOT a duplicate
-                    alert_message = create_alert_message(alert_detail, last_2h_volume, last_4h_volume, last_completed_hour_volume, symbol)
+                    alert_message = create_alert_message(alert_detail, last_2h_volume, last_4h_volume, last_completed_hour_volume, open_price, close_price, symbol)
                     print(f"[{datetime.datetime.now()}] Sending Telegram message for {symbol} (Level: {level})...")
                     if dry_run:
                         print(f"[{datetime.datetime.now()}] DRY RUN: Telegram message would have been sent for {symbol} (Level: {level}). Message details: {alert_message}")

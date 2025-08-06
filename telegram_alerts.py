@@ -36,6 +36,8 @@ def send_telegram_message(alert_message, include_restrict_button=False):
     last_2h_volume = int(alert_message['last_2h_volume']) # Format as integer
     last_4h_volume = int(alert_message['last_4h_volume']) # Format as integer
     last_1h_volume = int(alert_message['last_1h_volume']) # Format as integer
+    open_price = alert_message['open_price']
+    close_price = alert_message['close_price']
 
     message_text = (
         f"🚨 *Volume Alert - {symbol}* 🚨\n"
@@ -44,6 +46,7 @@ def send_telegram_message(alert_message, include_restrict_button=False):
         f"🕐 Last 1h Volume: {last_1h_volume:,}\n" # Add last 1h volume
         f"🕒 Last 2h Volume: {last_2h_volume:,}\n"
         f"🕓 Last 4h Volume: {last_4h_volume:,}\n"
+        f"💹 Last 1h Vol. candle Prices, Open: {open_price:.4f}, Close: {close_price:.4f}\n" # Add open and close prices
         f"🔥 Alert Level: *{level}*\n"
         f"🔗 {chart_url}\n"
         f"🔗 {binance_trade_url}"
