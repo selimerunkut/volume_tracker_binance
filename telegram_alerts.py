@@ -22,7 +22,7 @@ TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID = load_telegram_credentials()
 if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
     print(f"[{datetime.datetime.now()}] Telegram bot token or chat ID not found. Alerts will not be sent.")
 
-def send_telegram_message(alert_message, include_restrict_button=False):
+def send_telegram_message(alert_message, include_restrict_button=False, dry_run=False):
     # Use the globally loaded TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
     bot_token = TELEGRAM_BOT_TOKEN
     chat_id = TELEGRAM_CHAT_ID
@@ -46,7 +46,7 @@ def send_telegram_message(alert_message, include_restrict_button=False):
         f"🕐 Last 1h Volume: {last_1h_volume:,}\n" # Add last 1h volume
         f"🕒 Last 2h Volume: {last_2h_volume:,}\n"
         f"🕓 Last 4h Volume: {last_4h_volume:,}\n"
-        f"💹 Last 1h Vol. candle Prices, Open: {open_price:.4f}, Close: {close_price:.4f}\n" # Add open and close prices
+        f"💹 Last 1h Vol. candle Prices, Open: {open_price}, Close: {close_price}\n" # Open and close prices are now pre-formatted strings
         f"🔥 Alert Level: *{level}*\n"
         f"🔗 {chart_url}\n"
         f"🔗 {binance_trade_url}"
@@ -65,6 +65,10 @@ def send_telegram_message(alert_message, include_restrict_button=False):
         keyboard = [[InlineKeyboardButton(f"Restrict {symbol}", callback_data=f"restrict_{symbol}")]]
         reply_markup = InlineKeyboardMarkup(keyboard).to_json()
         payload['reply_markup'] = reply_markup
+    
+    if dry_run:
+        print(f"[{datetime.datetime.now()}] DRY RUN: Telegram message would have been sent for {symbol}. Message details: {message_text}")
+        return True # Indicate success for dry run
     
     try:
         response = requests.post(url, json=payload)

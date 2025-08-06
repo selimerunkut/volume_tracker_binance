@@ -90,8 +90,8 @@ def create_alert_message(alert_detail, last_2h_volume, last_4h_volume, last_comp
        'last_2h_volume': last_2h_volume,
        'last_4h_volume': last_4h_volume,
        'last_1h_volume': last_completed_hour_volume, # Add last 1h volume
-       'open_price': open_price,
-       'close_price': close_price,
+       'open_price': f"{open_price:.8f}", # Format as string with high precision
+       'close_price': f"{close_price:.8f}", # Format as string with high precision
        'chart_url': tradingview_url,
        'binance_trade_url': binance_trade_url
    }
@@ -182,6 +182,10 @@ def run_script(dry_run=False):
             df["close"] = pd.to_numeric(df["close"])
             df["volume"] = pd.to_numeric(df["volume"])
             
+            # Debugging: Print DataFrame head and dtypes to inspect data after conversion
+            # print(f"[{datetime.datetime.now()}] DEBUG: DataFrame head for {symbol}:\n{df.head()}")
+            # print(f"[{datetime.datetime.now()}] DEBUG: DataFrame dtypes for {symbol}:\n{df.dtypes}")
+
             if len(df) > 2:
                 # Current volume is the volume of the currently forming candle
                 curr_volume = df['volume'].iloc[-1]
@@ -218,11 +222,10 @@ def run_script(dry_run=False):
                 else: # Only proceed if it's NOT a duplicate
                     alert_message = create_alert_message(alert_detail, last_2h_volume, last_4h_volume, last_completed_hour_volume, open_price, close_price, symbol)
                     print(f"[{datetime.datetime.now()}] Sending Telegram message for {symbol} (Level: {level})...")
-                    if dry_run:
-                        print(f"[{datetime.datetime.now()}] DRY RUN: Telegram message would have been sent for {symbol} (Level: {level}). Message details: {alert_message}")
-                    else:
-                        if send_telegram_message(alert_message, include_restrict_button=True):
-                            # Update the timestamp for this alert and save the state
+                    # Always call send_telegram_message, let it handle dry_run internally
+                    if send_telegram_message(alert_message, include_restrict_button=True, dry_run=dry_run):
+                        # Update the timestamp for this alert and save the state ONLY if actually sent (not dry_run)
+                        if not dry_run:
                             time.sleep(1)
                             last_alert_timestamps[(symbol, level)] = {
                                 'timestamp': datetime.datetime.now(),
