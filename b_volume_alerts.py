@@ -178,6 +178,8 @@ def run_script(dry_run=False):
             #print(f"[{datetime.datetime.now()}] DEBUG: Klines data: {data}") # Uncomment for full data inspection if needed
             df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close", "volume", "close_time", "quote_asset_volume", "number_of_trades", "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
             df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+            df["open"] = pd.to_numeric(df["open"])
+            df["close"] = pd.to_numeric(df["close"])
             df["volume"] = pd.to_numeric(df["volume"])
             
             if len(df) > 2:
