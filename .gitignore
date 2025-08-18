@@ -8,6 +8,8 @@ env/
 venv/
 .venv/
 
+build
+
 # Specific to this project
 credentials_b.json
 
@@ -16,3 +18,4 @@ cex_volume_tracker.egg-info
 uv.lock
 .roo
 .roomodes
+hummingbot_api_manager.py

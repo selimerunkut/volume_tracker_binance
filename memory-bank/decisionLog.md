@@ -49,3 +49,4 @@ Implementation Details:
     - Modified `b_volume_alerts.py` to extract `open` and `close` prices of the current candle.
     - Passed `open_price` and `close_price` to `get_volume_alert_details` in `alert_levels_tg.py`.
     - Added a condition `close_price > open_price` in `get_volume_alert_details` to ensure alerts are only generated for candles where the closing price is higher than the opening price.
+[2025-08-18 19:15:32] - Decided to refactor `main` method in `hummingbot_integration.py` to use `argparse` for example selection, mirroring the structure and usage patterns of `hummingbot_api_manager.py`. This ensures consistency and ease of testing.

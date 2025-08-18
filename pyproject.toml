@@ -7,8 +7,11 @@ dependencies = [
     "pandas",
     "python-binance",
     "schedule",
-    "numpy", # Added numpy as it's often a dependency for pandas operations, and the user mentioned np.float64
+    "numpy",
     "python-telegram-bot",
+    "hummingbot-api-client",
+    "aiohttp",
+    "python-dotenv",
 ]
 requires-python = ">=3.8"
 
