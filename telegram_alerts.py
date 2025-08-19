@@ -3,13 +3,27 @@ import aiohttp # Import aiohttp for asynchronous HTTP requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import json
 import datetime # Import datetime for timestamping error messages
+import os # Import os to access environment variables
+import asyncio
+from dotenv import load_dotenv # Import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Determine if running in test mode
+TELEGRAM_BOT_TEST_MODE = os.getenv("TELEGRAM_BOT_TEST_MODE", "False").lower() == "true"
 
 # Load Telegram bot token and chat ID from credentials_b.json
 def load_telegram_credentials():
     try:
         with open('credentials_b.json', 'r') as f:
             credentials = json.load(f)
-            return credentials.get('telegram_bot_token'), credentials.get('telegram_chat_id')
+            if TELEGRAM_BOT_TEST_MODE:
+                print(f"[{datetime.datetime.now()}] Running in TEST MODE. Using test credentials for alerts.")
+                return credentials.get('telegram_bot_token_test'), credentials.get('telegram_chat_id_test')
+            else:
+                print(f"[{datetime.datetime.now()}] Running in PRODUCTION MODE. Using production credentials for alerts.")
+                return credentials.get('telegram_bot_token'), credentials.get('telegram_chat_id')
     except FileNotFoundError:
         print(f"[{datetime.datetime.now()}] credentials_b.json not found. Please create it with 'telegram_bot_token' and 'telegram_chat_id'.")
         return None, None

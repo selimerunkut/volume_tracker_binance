@@ -27,3 +27,6 @@ It is optional, but recommended to be updated as the project evolves.
 *   **Unit Testing (Implicit)**: Individual functions (e.g., `send_telegram_message` in `telegram_alerts.py`) include `if __name__ == "__main__":` blocks for standalone testing.
 *   **Integration Testing**: The `run_script()` function in `b_volume_alerts.py` can be executed once immediately for quick end-to-end testing of data fetching, alert generation, and Telegram message sending.
 *   **Service Behavior Testing**: `systemd`'s `Restart=always` behavior is tested by observing service restarts via `journalctl` after the script completes a single run. Temporary code modifications (e.g., limiting loop iterations) were used to speed up this testing.
+[2025-08-19 13:27:42] - Centralized State Management and Side Effects
+
+The `_synchronize_active_trades` method in `BotMonitor` now serves as the single point of truth for managing the `active_trades.json` state. This includes identifying bots to be removed (stopped/not found), performing the archiving action (`stop_and_archive_bot`), and sending initial notifications for these state changes. This reinforces the Single Responsibility Principle by encapsulating all state-modifying logic and immediate side effects related to trade synchronization within one method.

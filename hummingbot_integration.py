@@ -214,6 +214,23 @@ class HummingbotManager:
             print(f"An unexpected error occurred: {e}")
             return False, {"error": f"Unexpected error: {e}"}
 
+    async def get_all_bot_statuses(self) -> list[Dict[str, Any]]:
+        """
+        Retrieves the status of all active bot instances.
+        """
+        print("\n--- Getting All Bot Statuses ---")
+        try:
+            response = await self.client.bot_orchestration.get_active_bots_status()
+            print(f"All active bot statuses: {json.dumps(response, indent=2)}")
+            return response
+        except ClientResponseError as e:
+            print(f"API error occurred while getting all bot statuses: {e.status} - {e.message}")
+            print(f"Response content: {await e.text()}")
+            return {"status": "error", "data": {}}
+        except Exception as e:
+            print(f"An unexpected error occurred while getting all bot statuses: {e}")
+            return {"status": "error", "data": {}}
+
     async def stop_and_archive_bot(self, instance_name: str, skip_order_cancellation: bool = True, archive_locally: bool = True):
         """
         Stops a running bot instance and archives its data.

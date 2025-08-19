@@ -53,3 +53,20 @@ Implementation Details:
 [2025-08-19 10:26:00] - **Decision:** PnL and Open Order data for running bots will be extracted from `general_logs` messages using regex.
 **Rationale:** The `performance` field in the `get_bot_status` API response is currently empty, and no other structured JSON fields provide this data. Log messages are the only available source for this information.
 **Implementation Details:** Regular expressions are used to parse relevant strings from the `msg` field of log entries to extract PnL (e.g., "PnL: X.XXX YYY") and Open Orders (e.g., "Open orders: Z").
+[2025-08-19 11:54:26] - Decision: Refactor `BotMonitor` to inject a time provider for `datetime.now()`.
+Rationale: The user's feedback highlighted difficulty in testing time-dependent logic due to direct calls to `datetime.now()`. Injecting a time provider (e.g., a function or an object with a `now()` method) will decouple `BotMonitor` from the global `datetime` module, making it easier to mock time in tests and improving adherence to Dependency Inversion Principle (DIP) and Single Responsibility Principle (SRP). This directly addresses concerns about code testability and quality.
+Implications:
+- Modify `BotMonitor.__init__` to accept `time_provider`.
+- Update `_handle_running_bot` to use `self._time_provider()`.
+- Adjust `main_entry_point` to pass `datetime.datetime.now` as the default `time_provider`.
+- Update `tests/test_bot_monitor.py` to pass a mock `time_provider` and control its return values for time-dependent tests.
+[2025-08-19 13:27:05] - Centralized Bot Removal and Notification Logic in `_synchronize_active_trades`
+
+**Decision:** Centralized the logic for identifying, removing, archiving, and sending initial notifications for stopped/not-found Hummingbot instances within the `_synchronize_active_trades` method of `BotMonitor` in `bot_monitor.py`.
+
+**Rationale:** Previously, `_handle_stopped_bot` and `_handle_not_found_bot` were responsible for archiving and notifying. However, `_synchronize_active_trades` was already removing these bots from the active list, leading to a race condition and incorrect test assertions. Centralizing this logic ensures a single source of truth for state changes and simplifies testing.
+
+**Implications:** `_handle_stopped_bot` and `_handle_not_found_bot` are now primarily for notifications if a bot's status changes *after* synchronization but before the next cycle, or if `get_bot_status` returns a specific stopped/not-found status for a bot still in the active list. Test assertions for stopped/not-found bots now target `_synchronize_active_trades`'s effects (calling `stop_and_archive_bot` and `save_trades` with the modified list).
+[2025-08-19 14:05:51] - **Decision:** Ensure `HummingbotManager.get_all_bot_statuses` in `hummingbot_integration.py` consistently returns a dictionary with a 'data' key, even when an API error occurs.
+**Rationale:** The `BotMonitor._synchronize_active_trades` method expects `get_all_bot_statuses` to return a dictionary with a 'data' key. Currently, on exceptions, `get_all_bot_statuses` returns an empty list (`[]`), which causes a `'list' object has no attribute 'get'` error in `BotMonitor` when it attempts to call `.get('data', {})` on the list. By returning `{"status": "error", "data": {}}` (or similar structured error response) on exceptions, we ensure a consistent return type, preventing runtime errors in dependent modules.
+**Implications:** This change will require modifying the `except` blocks in `get_all_bot_statuses` in `hummingbot_integration.py`.

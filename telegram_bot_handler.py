@@ -7,9 +7,8 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from symbol_manager import SymbolManager
 from hummingbot_integration import HummingbotManager
-from trade_storage import add_trade_entry, load_active_trades # Import load_active_trades
-from telegram_alerts import send_telegram_message # Import send_telegram_message for confirmations
-from telegram_alerts import send_telegram_message # Import send_telegram_message for confirmations
+from trade_storage import TradeStorage
+from telegram_messenger import TelegramMessenger # Import TelegramMessenger
 
 # Load environment variables from .env file
 load_dotenv()
@@ -42,6 +41,8 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
     exit()
 
 symbol_manager = SymbolManager()
+trade_storage = TradeStorage() # Instantiate TradeStorage
+telegram_messenger = TelegramMessenger() # Instantiate TelegramMessenger
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a welcome message when the command /start is issued."""
@@ -77,9 +78,9 @@ async def unrestrict_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     symbol_to_unrestrict = context.args[0].upper()
     if symbol_manager.remove_symbol(symbol_to_unrestrict):
-        await update.effective_message.reply_text(f"Successfully unrestricted {symbol_to_unrestrict}.")
+        await telegram_messenger.send_simple_message(chat_id, f"Successfully unrestricted {symbol_to_unrestrict}.")
     else:
-        await update.effective_message.reply_text(f"{symbol_to_unrestrict} is not currently restricted.")
+        await telegram_messenger.send_simple_message(chat_id, f"{symbol_to_unrestrict} is not currently restricted.")
 
 async def restrict_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles callback queries from inline buttons to restrict a pair."""
@@ -88,9 +89,9 @@ async def restrict_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     symbol_to_restrict = query.data.replace("restrict_", "")
     if symbol_manager.add_symbol(symbol_to_restrict):
-        await query.edit_message_text(text=f"Successfully restricted {symbol_to_restrict}.")
+        await telegram_messenger.send_simple_message(chat_id, f"Successfully restricted {symbol_to_restrict}.")
     else:
-        await query.edit_message_text(text=f"{symbol_to_restrict} is already restricted.")
+        await telegram_messenger.send_simple_message(chat_id, f"{symbol_to_restrict} is already restricted.")
 
 async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Deploys a new Hummingbot instance based on user input."""
@@ -134,7 +135,7 @@ async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 "take_profit_delta": take_profit_delta,
                 "fixed_stop_loss_delta": fixed_stop_loss_delta
             }
-            add_trade_entry(trade_data)
+            trade_storage.add_trade_entry(trade_data)
             
             confirmation_message = (
                 f"✅ Bot Deployed Successfully! ✅\n"
@@ -146,18 +147,27 @@ async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 f"FixedStopLoss: `{fixed_stop_loss_delta}`\n"
                 f"Monitoring will begin shortly."
             )
-            await send_telegram_message(chat_id, confirmation_message, dry_run=False) # Send confirmation to user (console only)
+            await telegram_messenger.send_bot_deployed_confirmation(
+                chat_id,
+                instance_name,
+                trading_pair,
+                order_amount_usd,
+                trailing_stop_loss_delta,
+                take_profit_delta,
+                fixed_stop_loss_delta,
+                dry_run=False
+            )
             await update.effective_message.reply_text(confirmation_message) # Also reply in the chat
         else:
-            error_message = f"❌ Failed to deploy bot for {trading_pair}. Error: {result.get('error', 'Unknown error')}"
-            await send_telegram_message(chat_id, error_message, dry_run=False) # Send error to user (console only)
+            error_message = f"Failed to deploy bot for {trading_pair}. Error: {result.get('error', 'Unknown error')}"
+            await telegram_messenger.send_error_message(chat_id, error_message, dry_run=False)
             await update.effective_message.reply_text(error_message)
 
     except ValueError:
         await update.effective_message.reply_text("Invalid number format for order amount or deltas. Please provide valid numbers.")
     except Exception as e:
         error_message = f"An unexpected error occurred: {e}"
-        await send_telegram_message(chat_id, error_message, dry_run=False) # Send error to user (console only)
+        await telegram_messenger.send_error_message(chat_id, error_message, dry_run=False)
         await update.effective_message.reply_text(error_message)
 
 async def get_bot_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -229,7 +239,7 @@ async def get_bot_status_command(update: Update, context: ContextTypes.DEFAULT_T
                 status_messages.append(f"Failed to get status for `{instance_name}`. Error: {response.get('error', 'Unknown error')}")
         else:
             # Get status for all active bots for this chat_id
-            active_trades = load_active_trades()
+            active_trades = trade_storage.load_trades()
             user_bots = [trade for trade in active_trades if trade.get('chat_id') == chat_id]
 
             if not user_bots:
