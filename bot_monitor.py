@@ -63,19 +63,81 @@ async def main():
                         bot_status = status_response.get('status')
                         print(f"Bot '{instance_name}' status: {bot_status}")
 
-                        if bot_status == "stopped":
+                        bot_actual_status = status_response.get('data', {}).get('status')
+                        general_logs = status_response.get('data', {}).get('general_logs', [])
+                        error_logs = status_response.get('data', {}).get('error_logs', [])
+
+                        print(f"Bot '{instance_name}' actual status: {bot_actual_status}")
+
+                        if bot_actual_status == "stopped":
                             print(f"Bot '{instance_name}' has stopped. Archiving and notifying...")
                             await hummingbot_manager.stop_and_archive_bot(instance_name)
                             trades_to_remove.append(instance_name)
 
+                            stop_reason = "Unknown Reason"
+                            # Check general logs for specific stop reasons
+                            for log_entry in reversed(general_logs): # Check recent logs first
+                                msg = log_entry.get('msg', '').lower()
+                                if "fixed stop loss hit" in msg or "take profit hit" in msg or "all positions closed" in msg:
+                                    stop_reason = "Trade Completed"
+                                    break
+                                elif "stopping the strategy" in msg:
+                                    stop_reason = "Manual Stop/Strategy Stopped"
+                                    break
+                            
+                            # Check error logs for errors
+                            if error_logs:
+                                for log_entry in reversed(error_logs):
+                                    msg = log_entry.get('msg', '').lower()
+                                    if "error" in msg or "exception" in msg:
+                                        stop_reason = f"Error: {msg[:100]}..." # Truncate long error messages
+                                        break
+
                             message = (
-                                f"🔔 Trade Completed! 🔔\n"
+                                f"🔔 Bot Status Update 🔔\n"
                                 f"Bot: `{instance_name}`\n"
                                 f"Pair: `{trading_pair}`\n"
-                                f"Status: Stopped and Archived."
+                                f"Status: Stopped ({stop_reason})."
                             )
-                            await send_telegram_message(chat_id, message, dry_run=False) # For testing without Telegram
-                        elif bot_status == "not_found":
+                            await send_telegram_message(chat_id, message, dry_run=False)
+                            if instance_name in last_active_message_time:
+                                del last_active_message_time[instance_name]
+
+                        elif bot_actual_status == "running":
+                            current_time = datetime.now()
+                            last_sent = last_active_message_time.get(instance_name)
+                            
+                            # Send update every 5 minutes (300 seconds)
+                            if not last_sent or (current_time - last_sent).total_seconds() >= 300:
+                                pnl_info = "PnL: N/A"
+                                open_orders_info = "Open Orders: N/A"
+                                
+                                # Attempt to find PnL and open orders from recent logs
+                                for log_entry in reversed(general_logs):
+                                    msg = log_entry.get('msg', '')
+                                    pnl_match = re.search(r"PnL: ([\d\.\-]+ [A-Z]+)", msg)
+                                    open_orders_match = re.search(r"Open Orders: (\d+)", msg)
+                                    
+                                    if pnl_match:
+                                        pnl_info = f"PnL: {pnl_match.group(1)}"
+                                    if open_orders_match:
+                                        open_orders_info = f"Open Orders: {open_orders_match.group(1)}"
+                                    
+                                    if pnl_match and open_orders_match: # Stop if both found
+                                        break
+
+                                message = (
+                                    f"🟢 Bot is Active 🟢\n"
+                                    f"Bot: `{instance_name}`\n"
+                                    f"Pair: `{trading_pair}`\n"
+                                    f"{pnl_info}\n"
+                                    f"{open_orders_info}\n"
+                                    f"Status: Running."
+                                )
+                                await send_telegram_message(chat_id, message, dry_run=False)
+                                last_active_message_time[instance_name] = current_time
+
+                        elif bot_actual_status == "not_found":
                             print(f"Bot '{instance_name}' not found on Hummingbot instance. Removing from active trades.")
                             trades_to_remove.append(instance_name)
                             message = (
@@ -84,7 +146,9 @@ async def main():
                                 f"Pair: `{trading_pair}`\n"
                                 f"Status: Not found on Hummingbot instance. Removed from active trades."
                             )
-                            await send_telegram_message(chat_id, message, dry_run=False) # For testing without Telegram
+                            await send_telegram_message(chat_id, message, dry_run=False)
+                            if instance_name in last_active_message_time:
+                                del last_active_message_time[instance_name]
 
                     except Exception as e:
                         print(f"Error checking status for bot '{instance_name}': {e}")

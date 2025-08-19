@@ -1,12 +1,14 @@
 import os
 import json
+import re # Import for regex parsing
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from symbol_manager import SymbolManager
 from hummingbot_integration import HummingbotManager
-from trade_storage import add_trade_entry
+from trade_storage import add_trade_entry, load_active_trades # Import load_active_trades
+from telegram_alerts import send_telegram_message # Import send_telegram_message for confirmations
 from telegram_alerts import send_telegram_message # Import send_telegram_message for confirmations
 
 # Load environment variables from .env file
@@ -54,6 +56,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/list_restricted - List all restricted trading pairs\n"
         "/unrestrict <SYMBOL> - Unrestrict a specific trading pair (e.g., /unrestrict MATICBTC)\n"
         "/buy <trading_pair> <order_amount_usd> [trailing_stop_loss_delta] [take_profit_delta] [fixed_stop_loss_delta] - Deploy a new Hummingbot instance\n"
+        "/status [instance_name] - Get status of a specific bot or all active bots\n"
     )
     await update.effective_message.reply_text(help_text)
 
@@ -157,6 +160,142 @@ async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await send_telegram_message(chat_id, error_message, dry_run=False) # Send error to user (console only)
         await update.effective_message.reply_text(error_message)
 
+async def get_bot_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Gets the status of a specific bot or all active bots."""
+    chat_id = str(update.effective_chat.id)
+    hummingbot_manager: HummingbotManager = context.bot_data.get('hummingbot_manager')
+
+    if not hummingbot_manager:
+        await update.effective_message.reply_text("Hummingbot manager is not initialized. Please try again later.")
+        return
+
+    instance_name = context.args[0] if context.args else None
+    status_messages = []
+
+    try:
+        if instance_name:
+            # Get status for a specific bot
+            success, response = await hummingbot_manager.get_bot_status(instance_name)
+            if success:
+                bot_actual_status = response.get('data', {}).get('status')
+                general_logs = response.get('data', {}).get('general_logs', [])
+                error_logs = response.get('data', {}).get('error_logs', [])
+
+                status_text = f"Bot: `{instance_name}`\nStatus: `{bot_actual_status}`\n"
+                
+                # PnL and Open Orders are not available in structured JSON, parse from logs
+                pnl_info = "PnL: N/A"
+                open_orders_info = "Open Orders: N/A"
+                
+                # Iterate through logs to find PnL and Open Orders
+                for log_entry in reversed(general_logs):
+                    msg = log_entry.get('msg', '')
+                    # Example log for PnL: "Current PnL: 0.001 ETH"
+                    pnl_match = re.search(r"PnL: ([\d\.\-]+ [A-Z]+)", msg)
+                    # Example log for Open Orders: "Open orders: 2"
+                    open_orders_match = re.search(r"Open orders: (\d+)", msg)
+                    
+                    if pnl_match:
+                        pnl_info = f"PnL: {pnl_match.group(1)}"
+                    if open_orders_match:
+                        open_orders_info = f"Open Orders: {open_orders_match.group(1)}"
+                    
+                    # If both are found, no need to search further in older logs
+                    if pnl_match and open_orders_match:
+                        break
+                
+                status_text += f"{pnl_info}\n{open_orders_info}\n"
+
+                if bot_actual_status == "stopped":
+                    stop_reason = "Unknown Reason"
+                    for log_entry in reversed(general_logs):
+                        msg = log_entry.get('msg', '').lower()
+                        if "fixed stop loss hit" in msg or "take profit hit" in msg or "all positions closed" in msg:
+                            stop_reason = "Trade Completed"
+                            break
+                        elif "stopping the strategy" in msg:
+                            stop_reason = "Manual Stop/Strategy Stopped"
+                            break
+                    if error_logs:
+                        for log_entry in reversed(error_logs):
+                            msg = log_entry.get('msg', '').lower()
+                            if "error" in msg or "exception" in msg:
+                                stop_reason = f"Error: {msg[:100]}..."
+                                break
+                    status_text += f"Stop Reason: {stop_reason}\n"
+                
+                status_messages.append(status_text)
+            else:
+                status_messages.append(f"Failed to get status for `{instance_name}`. Error: {response.get('error', 'Unknown error')}")
+        else:
+            # Get status for all active bots for this chat_id
+            active_trades = load_active_trades()
+            user_bots = [trade for trade in active_trades if trade.get('chat_id') == chat_id]
+
+            if not user_bots:
+                status_messages.append("No active bots found for your chat ID.")
+            else:
+                status_messages.append("--- Your Active Bots ---\n")
+                for trade in user_bots:
+                    bot_instance_name = trade.get('instance_name')
+                    trading_pair = trade.get('trading_pair')
+                    
+                    success, response = await hummingbot_manager.get_bot_status(bot_instance_name)
+                    if success:
+                        bot_actual_status = response.get('data', {}).get('status')
+                        general_logs = response.get('data', {}).get('general_logs', [])
+                        error_logs = response.get('data', {}).get('error_logs', [])
+
+                        status_text = f"Bot: `{bot_instance_name}` (Pair: `{trading_pair}`)\nStatus: `{bot_actual_status}`\n"
+                        
+                        # PnL and Open Orders are not available in structured JSON, parse from logs
+                        pnl_info = "PnL: N/A"
+                        open_orders_info = "Open Orders: N/A"
+                        
+                        # Iterate through logs to find PnL and Open Orders
+                        for log_entry in reversed(general_logs):
+                            msg = log_entry.get('msg', '')
+                            pnl_match = re.search(r"PnL: ([\d\.\-]+ [A-Z]+)", msg)
+                            open_orders_match = re.search(r"Open orders: (\d+)", msg)
+                            
+                            if pnl_match:
+                                pnl_info = f"PnL: {pnl_match.group(1)}"
+                            if open_orders_match:
+                                open_orders_info = f"Open Orders: {open_orders_match.group(1)}"
+                            
+                            if pnl_match and open_orders_match:
+                                break
+                        
+                        status_text += f"{pnl_info}\n{open_orders_info}\n"
+
+                        if bot_actual_status == "stopped":
+                            stop_reason = "Unknown Reason"
+                            for log_entry in reversed(general_logs):
+                                msg = log_entry.get('msg', '').lower()
+                                if "fixed stop loss hit" in msg or "take profit hit" in msg or "all positions closed" in msg:
+                                    stop_reason = "Trade Completed"
+                                    break
+                                elif "stopping the strategy" in msg:
+                                    stop_reason = "Manual Stop/Strategy Stopped"
+                                    break
+                            if error_logs:
+                                for log_entry in reversed(error_logs):
+                                    msg = log_entry.get('msg', '').lower()
+                                    if "error" in msg or "exception" in msg:
+                                        stop_reason = f"Error: {msg[:100]}..."
+                                        break
+                            status_text += f"Stop Reason: {stop_reason}\n"
+                        
+                        status_messages.append(status_text)
+                    else:
+                        status_messages.append(f"Failed to get status for `{bot_instance_name}`. Error: {response.get('error', 'Unknown error')}")
+                    status_messages.append("-" * 20) # Separator for multiple bots
+    except Exception as e:
+        status_messages.append(f"An unexpected error occurred while fetching bot status: {e}")
+
+    final_message = "\n".join(status_messages)
+    await update.effective_message.reply_text(final_message)
+
 async def post_init_callback(application: Application) -> None:
     """Initializes HummingbotManager after the event loop has started."""
     hummingbot_api_url = os.getenv("HUMMINGBOT_API_URL", "http://localhost:8000")
@@ -207,8 +346,8 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(restrict_callback, pattern="^restrict_"))
     
     # The /buy command handler will be added dynamically in post_init_callback
-    # if 'hummingbot_manager' in application.bot_data: # This check is no longer needed here
-    application.add_handler(CommandHandler("buy", buy_command)) # Always add the handler, check for manager inside buy_command
+    application.add_handler(CommandHandler("buy", buy_command))
+    application.add_handler(CommandHandler("status", get_bot_status_command)) # Register new status command
 
     # Run the bot until the user presses Ctrl-C
     print(f"[{datetime.now()}] Telegram bot started. Listening for updates...")

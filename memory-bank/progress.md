@@ -15,6 +15,8 @@ This file tracks the project's progress using a task list format.
 *   Updated `README.md` and `setup_bot_server.sh` with `systemd` configuration.
 *   Confirmed `systemd` service restart behavior.
 *   Created all standard Memory Bank files.
+*   Enhanced bot status monitoring in `bot_monitor.py` with granular updates (active, stopped reasons, PnL/open orders from logs).
+*   Added `/status` Telegram command in `telegram_bot_handler.py` for bot status inquiry (single or all active bots) and updated `/help` message.
 
 ## Current Tasks
 

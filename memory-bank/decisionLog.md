@@ -50,3 +50,6 @@ Implementation Details:
     - Passed `open_price` and `close_price` to `get_volume_alert_details` in `alert_levels_tg.py`.
     - Added a condition `close_price > open_price` in `get_volume_alert_details` to ensure alerts are only generated for candles where the closing price is higher than the opening price.
 [2025-08-18 19:15:32] - Decided to refactor `main` method in `hummingbot_integration.py` to use `argparse` for example selection, mirroring the structure and usage patterns of `hummingbot_api_manager.py`. This ensures consistency and ease of testing.
+[2025-08-19 10:26:00] - **Decision:** PnL and Open Order data for running bots will be extracted from `general_logs` messages using regex.
+**Rationale:** The `performance` field in the `get_bot_status` API response is currently empty, and no other structured JSON fields provide this data. Log messages are the only available source for this information.
+**Implementation Details:** Regular expressions are used to parse relevant strings from the `msg` field of log entries to extract PnL (e.g., "PnL: X.XXX YYY") and Open Orders (e.g., "Open orders: Z").

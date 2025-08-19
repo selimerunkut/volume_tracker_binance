@@ -204,7 +204,7 @@ class HummingbotManager:
         try:
             response = await self.client.bot_orchestration.get_bot_status(instance_name)
             print(f"Status for '{instance_name}':")
-            print(json.dumps(response, indent=2))
+            #print(json.dumps(response, indent=2))
             return True, response
         except ClientResponseError as e:
             print(f"API error occurred: {e.status} - {e.message}")

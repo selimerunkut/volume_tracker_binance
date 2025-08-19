@@ -7,7 +7,7 @@ This file tracks the project's current status, including recent changes, current
 
 ## Current Focus
 
-*   Populating the Memory Bank files with project information.
+*   Enhancing bot status monitoring and adding Telegram command for status inquiry.
 
 ## Recent Changes
 
@@ -25,3 +25,7 @@ This file tracks the project's current status, including recent changes, current
 *   **Systemd Service Monitoring**: While `Restart=always` is configured, continuous monitoring of `journalctl` logs is needed to ensure the service is consistently restarting and running as expected, especially after initial setup.
 [2025-08-06 14:09:00] - Implemented filtering for "bullish" volume in alerts.
 [2025-08-18 19:15:23] - Completed implementation and testing of `hummingbot_integration.py`. The module provides an interface for managing Hummingbot instances, including creation, deployment, status checks, and stopping/archiving.
+[2025-08-19 10:26:30] - Implemented granular bot status updates in `bot_monitor.py` (active, stopped reasons, PnL/open orders from logs).
+[2025-08-19 10:26:30] - Added `/status` Telegram command in `telegram_bot_handler.py` for bot status inquiry (single or all active bots) and updated `/help` message.
+[2025-08-19 10:26:30] - Resolved `NameError: name 're' is not defined` in `telegram_bot_handler.py` by adding `import re`.
+[2025-08-19 10:26:30] - Confirmed that PnL and open order data are extracted from log messages using regex, as structured JSON fields are not currently available.
