@@ -17,7 +17,7 @@ This file tracks the project's current status, including recent changes, current
 *   Resolution of `ModuleNotFoundError` and `setuptools` "Multiple top-level modules" error by configuring `pyproject.toml` with `py-modules`.
 *   Transition from internal scheduling/cron to `systemd` service for robust execution.
 *   Updates to `README.md` and `setup_bot_server.sh` for `systemd` configuration.
-*   Creation of standard Memory Bank files (`productContext.md`, `activeContext.md`, `progress.md`, `decisionLog.md`, `systemPatterns.md`).
+*   Creation of standard Memory Bank files (`productContext.md`, `activeContext.md`, `progress.md`, `decisionLog.md`, `systemPatterns.md`, `architecture_diagram.md`, `changelog.md` ).
 
 ## Open Questions/Issues
 
