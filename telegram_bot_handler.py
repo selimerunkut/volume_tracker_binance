@@ -12,14 +12,22 @@ from telegram_alerts import send_telegram_message # Import send_telegram_message
 # Load environment variables from .env file
 load_dotenv()
 
+# Determine if running in test mode
+TELEGRAM_BOT_TEST_MODE = os.getenv("TELEGRAM_BOT_TEST_MODE", "False").lower() == "true"
+
 # Load Telegram bot token and chat ID from credentials_b.json
 def load_telegram_credentials():
     try:
         with open('credentials_b.json', 'r') as f:
             credentials = json.load(f)
-            return credentials.get('telegram_bot_token'), credentials.get('telegram_chat_id')
+            if TELEGRAM_BOT_TEST_MODE:
+                print(f"[{datetime.now()}] Running in TEST MODE. Using test credentials.")
+                return credentials.get('telegram_bot_token_test'), credentials.get('telegram_chat_id_test')
+            else:
+                print(f"[{datetime.now()}] Running in PRODUCTION MODE. Using production credentials.")
+                return credentials.get('telegram_bot_token'), credentials.get('telegram_chat_id')
     except FileNotFoundError:
-        print(f"[{datetime.now()}] credentials_b.json not found. Please create it with 'telegram_bot_token' and 'telegram_chat_id'.")
+        print(f"[{datetime.now()}] credentials_b.json not found. Please create it with 'telegram_bot_token' and 'telegram_chat_id' (and test credentials if using TELEGRAM_BOT_TEST_MODE).")
         return None, None
     except json.JSONDecodeError as e:
         print(f"[{datetime.now()}] Error decoding credentials_b.json: {e}")

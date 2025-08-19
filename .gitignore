@@ -19,3 +19,4 @@ uv.lock
 .roo
 .roomodes
 hummingbot_api_manager.py
+.env
