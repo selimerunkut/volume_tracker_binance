@@ -63,3 +63,5 @@ This file tracks the project's progress using a task list format.
 *   Further enhancements to alert logic or features as requested.
 [2025-08-06 14:09:00] - Implemented bullish volume filtering.
 [2025-08-18 19:15:12] - Implemented and successfully tested `hummingbot_integration.py` module, including `HummingbotManager` class and its core functionalities.
+[2025-08-18 21:23:53] - Corrected exception handling in `telegram_alerts.py` to use `aiohttp.ClientError` for better error reporting.
+[2025-08-18 21:26:58] - Modified `telegram_bot_handler.py` to use `update.effective_message.reply_text` for all replies, resolving `AttributeError: 'NoneType' object has no attribute 'reply_text'`.
