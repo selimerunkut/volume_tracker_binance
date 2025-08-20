@@ -203,11 +203,14 @@ class TestBotMonitor(unittest.IsolatedAsyncioTestCase):
         with patch('asyncio.sleep', new=AsyncMock(side_effect=asyncio.CancelledError)):
             await self.bot_monitor.run()
             self.mock_hummingbot_manager.stop_and_archive_bot.assert_called_once_with('test_bot_2')
-            self.trade_storage.save_trades.assert_called_once_with([])
+            self.trade_storage.save_trades.assert_has_calls([
+                unittest.mock.call([trade_entry]), # Initial save from _synchronize_active_trades
+                unittest.mock.call([]) # Final save after removal
+            ])
             self.assertEqual(len(self._sent_messages), 1)
             self.assertEqual(self._sent_messages[0]['kwargs']['instance_name'], 'test_bot_2')
             self.assertEqual(self._sent_messages[0]['kwargs']['status'], 'stopped')
-            self.assertEqual(self._sent_messages[0]['kwargs']['stop_reason'], 'Removed from active trades')
+            self.assertEqual(self._sent_messages[0]['kwargs']['stop_reason'], 'Trade Completed')
             self.assertEqual(len(self._active_trades_data), 0) # Should be removed
 
     async def test_bot_stopped_manual_stop(self):
@@ -234,13 +237,16 @@ class TestBotMonitor(unittest.IsolatedAsyncioTestCase):
 
         with patch('asyncio.sleep', new=AsyncMock(side_effect=asyncio.CancelledError)):
             await self.bot_monitor.run()
-            self.mock_hummingbot_manager.stop_and_archive_bot.assert_called_once_with('test_bot_3')
-            self.trade_storage.save_trades.assert_called_once_with([])
+            self.mock_hummingbot_manager.stop_and_archive_bot.assert_not_called() # Should NOT archive
+            self.trade_storage.save_trades.assert_has_calls([
+                unittest.mock.call([trade_entry]), # Initial save from _synchronize_active_trades
+                unittest.mock.call([trade_entry]) # Final save, still in active trades
+            ])
             self.assertEqual(len(self._sent_messages), 1)
             self.assertEqual(self._sent_messages[0]['kwargs']['instance_name'], 'test_bot_3')
             self.assertEqual(self._sent_messages[0]['kwargs']['status'], 'stopped')
-            self.assertEqual(self._sent_messages[0]['kwargs']['stop_reason'], 'Removed from active trades')
-            self.assertEqual(len(self._active_trades_data), 0)
+            self.assertEqual(self._sent_messages[0]['kwargs']['stop_reason'], 'Manual Stop/Strategy Stopped')
+            self.assertEqual(len(self._active_trades_data), 1) # Should remain
 
     async def test_bot_stopped_error(self):
         trade_entry = {
@@ -265,13 +271,16 @@ class TestBotMonitor(unittest.IsolatedAsyncioTestCase):
 
         with patch('asyncio.sleep', new=AsyncMock(side_effect=asyncio.CancelledError)):
             await self.bot_monitor.run()
-            self.mock_hummingbot_manager.stop_and_archive_bot.assert_called_once_with('test_bot_4')
-            self.trade_storage.save_trades.assert_called_once_with([])
+            self.mock_hummingbot_manager.stop_and_archive_bot.assert_not_called() # Should NOT archive
+            self.trade_storage.save_trades.assert_has_calls([
+                unittest.mock.call([trade_entry]), # Initial save from _synchronize_active_trades
+                unittest.mock.call([trade_entry]) # Final save, still in active trades
+            ])
             self.assertEqual(len(self._sent_messages), 1)
             self.assertEqual(self._sent_messages[0]['kwargs']['instance_name'], 'test_bot_4')
             self.assertEqual(self._sent_messages[0]['kwargs']['status'], 'stopped')
-            self.assertEqual(self._sent_messages[0]['kwargs']['stop_reason'], 'Removed from active trades')
-            self.assertEqual(len(self._active_trades_data), 0)
+            self.assertEqual(self._sent_messages[0]['kwargs']['stop_reason'], 'Error: an unhandled exception occurred: divisionbyzeroerror....')
+            self.assertEqual(len(self._active_trades_data), 1) # Should remain
 
     async def test_bot_not_found(self):
         trade_entry = {
@@ -293,12 +302,17 @@ class TestBotMonitor(unittest.IsolatedAsyncioTestCase):
 
         with patch('asyncio.sleep', new=AsyncMock(side_effect=asyncio.CancelledError)):
             await self.bot_monitor.run()
-            self.mock_hummingbot_manager.stop_and_archive_bot.assert_called_once_with('test_bot_5') # Should archive if not found in active bots
-            self.trade_storage.save_trades.assert_called_once_with([])
-            self.assertEqual(len(self._sent_messages), 1)
-            self.assertEqual(self._sent_messages[0]['kwargs']['instance_name'], 'test_bot_5')
-            self.assertEqual(self._sent_messages[0]['kwargs']['status'], 'stopped')
-            self.assertEqual(self._sent_messages[0]['kwargs']['stop_reason'], 'Removed from active trades')
+            self.mock_hummingbot_manager.stop_and_archive_bot.assert_called_once_with('test_bot_5') # Should archive if not found
+            self.trade_storage.save_trades.assert_has_calls([
+                unittest.mock.call([trade_entry]), # Initial save from _synchronize_active_trades
+                unittest.mock.call([]) # Final save after removal
+            ])
+            self.mock_telegram_messenger.send_bot_not_found_alert.assert_called_once_with(
+                trade_entry['chat_id'],
+                instance_name=trade_entry['instance_name'],
+                trading_pair=trade_entry['trading_pair']
+            )
+            self.assertEqual(len(self._sent_messages), 1) # Still expect one message to be captured by the mock
             self.assertEqual(len(self._active_trades_data), 0)
 
     async def test_error_during_status_check(self):
@@ -339,6 +353,10 @@ class TestBotMonitor(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(self._sent_messages), 1) # Now expects one message due to _mock_send_message side effect
             self.assertEqual(self._sent_messages[0]['chat_id'], "12345")
             self.assertEqual(self._sent_messages[0]['args'][0], "Error checking status for bot 'test_bot_6': API connection error")
+            self.trade_storage.save_trades.assert_has_calls([
+                unittest.mock.call([trade_entry]), # Initial save from _synchronize_active_trades
+                unittest.mock.call([trade_entry]) # Final save, still in active trades
+            ])
             self.assertEqual(len(self._active_trades_data), 1) # Trade should not be removed
 
     async def test_missing_instance_name_in_trade(self):
@@ -352,7 +370,11 @@ class TestBotMonitor(unittest.IsolatedAsyncioTestCase):
             await self.bot_monitor.run()
             self.mock_hummingbot_manager.get_bot_status.assert_not_called()
             self.assertEqual(len(self._sent_messages), 0)
-            self.assertEqual(len(self._active_trades_data), 1) # Trade should not be removed
+            self.trade_storage.save_trades.assert_has_calls([
+                unittest.mock.call([trade_entry]), # Initial save from _synchronize_active_trades
+                unittest.mock.call([]) # Final save, as it's skipped
+            ])
+            self.assertEqual(len(self._active_trades_data), 0) # Should be removed because it's skipped and not added to trades_to_keep
 
     async def test_synchronize_with_provided_data(self):
         instance_name = "buy_sell_trailing_stop_bot_SOL_USDC_3iy1c2h6"
@@ -372,19 +394,29 @@ class TestBotMonitor(unittest.IsolatedAsyncioTestCase):
             "status": "success",
             "data": {
                 instance_name: {
+                    "instance_name": instance_name, # Added instance_name for synchronization
                     "status": "stopped",
                     "performance": {},
                     "error_logs": [],
                     "general_logs": [
-                        {"level_name": "INFO", "msg": "Placing initial MARKET BUY order...", "timestamp": 1755610487.0020397},
-                        {"level_name": "INFO", "msg": "The BUY order ... has been filled...", "timestamp": 1755610487.3215637},
-                        {"level_name": "INFO", "msg": "BUY order ... completely filled.", "timestamp": 1755610487.3350017}
+                        {"level_name": "INFO", "msg": "Fixed stop loss hit.", "timestamp": 1755610487.0020397}, # Simulate trade completed
                     ],
                     "recently_active": True,
                     "source": "docker"
                 }
             }
         }
+        # Mock get_bot_status to return the detailed logs for _process_active_trades
+        self.mock_hummingbot_manager.get_bot_status.return_value = (True, {
+            "status": "success",
+            "data": {
+                "status": "stopped",
+                "general_logs": [
+                    {"level_name": "INFO", "msg": "Fixed stop loss hit.", "timestamp": 1755610487.0020397}, # Simulate trade completed
+                ],
+                "error_logs": [],
+            }
+        })
 
         # Patch asyncio.sleep to raise CancelledError after one iteration
         with patch('asyncio.sleep', new=AsyncMock(side_effect=asyncio.CancelledError)):
@@ -393,13 +425,16 @@ class TestBotMonitor(unittest.IsolatedAsyncioTestCase):
             # Assertions
             # The bot should be removed from active trades and archived
             self.mock_hummingbot_manager.stop_and_archive_bot.assert_called_once_with(instance_name)
-            self.trade_storage.save_trades.assert_called_once_with([])
+            self.trade_storage.save_trades.assert_has_calls([
+                unittest.mock.call([trade_entry]), # Initial save from _synchronize_active_trades
+                unittest.mock.call([]) # Final save after removal
+            ])
             self.mock_telegram_messenger.send_bot_status_update.assert_called_once_with(
                 chat_id,
                 instance_name=instance_name,
                 trading_pair=trading_pair,
                 status="stopped",
-                stop_reason="Removed from active trades"
+                stop_reason="Trade Completed"
             )
             self.assertEqual(len(self._active_trades_data), 0) # Should be removed
 

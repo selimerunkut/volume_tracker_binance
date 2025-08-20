@@ -83,3 +83,4 @@ This file tracks the project's progress using a task list format.
 [2025-08-19 15:35:54] - Detailed review of unstaged changes completed. Identified major refactoring in `bot_monitor.py` (new classes, centralized state management in `_synchronize_active_trades`), new `get_all_bot_statuses` in `hummingbot_integration.py`, `TradeStorage` class in `trade_storage.py`, and `telegram_messenger.py` as a new file. Updated `telegram_alerts.py` and `telegram_bot_handler.py` to use new `TelegramMessenger` and `TradeStorage` classes, and to support `TELEGRAM_BOT_TEST_MODE`.
 [2025-08-19 15:38:54] - New task added: `bot_monitor.py` needs to send buy and sell messages that can be parsed like bot status messages.
 [2025-08-20 18:08:00] - Completed debugging and fixing test failures in `tests/test_bot_monitor.py`. Resolved timestamp type mismatch and assertion issues.
+[2025-08-20 19:44:54] - Completed fix for premature bot archiving and verified multi-bot handling.

@@ -48,3 +48,7 @@ This file tracks the project's current status, including recent changes, current
 - `telegram_bot_handler.py`: Updated to use `TradeStorage` and `TelegramMessenger` instances.
 - `tests/test_bot_monitor.py`: Significant updates to mock `TelegramMessenger` and `TradeStorage`, and to adjust assertions for message content and `save_trades` calls.
 [2025-08-19 15:39:04] - Added new task: Enhance `bot_monitor.py` to send buy and sell messages in a parsable format, similar to bot status messages. This will likely involve extending `TelegramNotifier` and `TelegramMessenger` to handle new message types and extracting relevant information from Hummingbot logs or API responses.
+[2025-08-20 18:42:19] - Refactoring `bot_monitor.py` to address premature bot archiving and ensure consistent trade notifications. Focusing on `_synchronize_active_trades` to only add new bots, and moving removal/archiving logic to `_process_active_trades`.
+[2025-08-20 19:45:23] - **Current Focus**: Verified and fixed bot archiving logic, ensuring correct behavior for single and multiple bot scenarios.
+**Recent Changes**: Refactored `bot_monitor.py` to optimize API calls and improve log processing for accurate trade completion detection. Updated `simulate_trade_logs.py` to include multi-bot simulation.
+**Open Questions/Issues**: None. The core archiving and multi-bot handling is verified.

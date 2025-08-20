@@ -38,6 +38,7 @@ class TelegramNotifier:
         if message_type == "simple":
             await self._messenger.send_simple_message(chat_id, message)
         elif message_type == "bot_status_update":
+            print(f"DEBUG: Notifier received bot_status_update for {kwargs.get('instance_name')}")
             await self._messenger.send_bot_status_update(chat_id, **kwargs)
         elif message_type == "bot_not_found_alert":
             await self._messenger.send_bot_not_found_alert(chat_id, **kwargs)
@@ -59,7 +60,7 @@ class BotMonitor:
                  hummingbot_manager: HummingbotManager,
                  trade_storage: TradeStorage,
                  notifier: TelegramNotifier,
-                 check_interval_seconds: int = 60,
+                 check_interval_seconds: int = 10,
                  time_provider: Callable[[], datetime] = datetime.now): # Added time_provider
         self._hummingbot_manager = hummingbot_manager
         self._trade_storage = trade_storage
@@ -93,7 +94,7 @@ class BotMonitor:
         stop_reason = "Unknown Reason"
         for log_entry in reversed(general_logs):
             msg = log_entry.get('msg', '').lower()
-            if "fixed stop loss hit" in msg or "take profit hit" in msg or "all positions closed" in msg:
+            if "fixed stop loss hit" in msg or "take profit hit" in msg or "all positions closed" in msg or "trade completed" in msg:
                 stop_reason = "Trade Completed"
                 break
             elif "stopping the strategy" in msg:
@@ -109,16 +110,14 @@ class BotMonitor:
         return stop_reason
 
     async def _handle_stopped_bot(self, trade: Dict[str, Any], instance_name: str, status_response: Dict[str, Any]):
+        print(f"DEBUG: Entering _handle_stopped_bot for {instance_name}")
         """Handles a stopped bot and sends a notification. Archiving is handled by _synchronize_active_trades."""
         chat_id = trade.get('chat_id')
         trading_pair = trade.get('trading_pair')
-        general_logs = status_response.get('data', {}).get('general_logs', [])
-        error_logs = status_response.get('data', {}).get('error_logs', [])
+        general_logs = status_response.get('general_logs', [])
+        error_logs = status_response.get('error_logs', [])
 
         print(f"Bot '{instance_name}' has stopped. Notifying...")
-        # Archiving and removal from active_trades.json is now handled by _synchronize_active_trades
-        # await self._hummingbot_manager.stop_and_archive_bot(instance_name) # Removed
-        # print(f"Bot '{instance_name}' stopped and archived.") # Removed
 
         stop_reason = await self._determine_stop_reason(general_logs, error_logs)
         message = (
@@ -141,7 +140,7 @@ class BotMonitor:
         """Handles a running bot and sends periodic updates."""
         chat_id = trade.get('chat_id')
         trading_pair = trade.get('trading_pair')
-        general_logs = status_response.get('data', {}).get('general_logs', [])
+        general_logs = status_response.get('general_logs', [])
 
         current_time = self._time_provider() # Use the injected time provider
         last_sent = self._last_active_message_time.get(instance_name)
@@ -173,8 +172,6 @@ class BotMonitor:
         trading_pair = trade.get('trading_pair')
 
         print(f"Bot '{instance_name}' not found on Hummingbot instance.")
-        # Archiving and removal from active_trades.json is now handled by _synchronize_active_trades
-        # # self._trade_storage.remove_trade(instance_name) # Removed
         message = (
             f"⚠️ Bot Not Found! ⚠️\n"
             f"Bot: `{instance_name}`\n"
@@ -189,10 +186,10 @@ class BotMonitor:
         )
         self._last_active_message_time.pop(instance_name, None)
 
-    async def _synchronize_active_trades(self) -> List[Dict[str, Any]]:
+    async def _synchronize_active_trades(self) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Synchronizes the local active_trades.json with the actual running bots from Hummingbot API.
-        Returns the updated list of active trades.
+        Returns the updated list of active trades and the bot status data.
         """
         # 1. Get all currently running bots from Hummingbot API
         # The get_all_bot_statuses method returns a dictionary with 'status' and 'data' keys.
@@ -200,82 +197,57 @@ class BotMonitor:
         all_bot_statuses_response = await self._hummingbot_manager.get_all_bot_statuses()
         # The 'data' key contains a dictionary where keys are instance names and values are bot status dictionaries.
         # We need to iterate over the values of this dictionary.
+        print(f"DEBUG: _synchronize_active_trades - all_bot_statuses_response: {all_bot_statuses_response}")
         all_bot_statuses_data = all_bot_statuses_response.get('data', {})
-        all_bot_statuses = list(all_bot_statuses_data.values())
-        running_bot_names = {bot_status.get('instance_name') for bot_status in all_bot_statuses if bot_status.get('instance_name')}
-        running_bot_details = {bot_status.get('instance_name'): bot_status for bot_status in all_bot_statuses if bot_status.get('instance_name')}
+        print(f"DEBUG: _synchronize_active_trades - all_bot_statuses_data: {all_bot_statuses_data}")
+        # The instance_name is the KEY in the data dictionary, not a field in each bot status
+        running_bot_names = set(all_bot_statuses_data.keys())
+        print(f"DEBUG: _synchronize_active_trades - running_bot_names: {running_bot_names}")
+        running_bot_details = all_bot_statuses_data  # The data dict already maps instance_name -> bot_status
+        print(f"DEBUG: _synchronize_active_trades - running_bot_details: {running_bot_details}")
 
         # 2. Load existing active trades from local storage
         active_trades = self._trade_storage.load_trades()
+        print(f"DEBUG: _synchronize_active_trades - active_trades (before adding): {active_trades}")
         active_trade_names = {trade.get('instance_name') for trade in active_trades if trade.get('instance_name')}
+        print(f"DEBUG: _synchronize_active_trades - active_trade_names: {active_trade_names}")
 
-        # 3. Identify and remove stopped/non-existent bots from local storage
-        bots_to_remove = active_trade_names - running_bot_names
-        # Create a new list for trades that should remain active
-        updated_active_trades = []
-        for trade in active_trades:
-            instance_name = trade.get('instance_name')
-            if instance_name in bots_to_remove:
-                print(f"Bot '{instance_name}' is no longer running or not found. Removing from active trades.")
-                # Retrieve the full trade object for notification
-                original_trade_data = next((t for t in active_trades if t.get('instance_name') == instance_name), None)
-                if original_trade_data:
-                    # Archive the bot
-                    await self._hummingbot_manager.stop_and_archive_bot(instance_name)
-                    
-                    # Send notification for stopped/not-found bot
-                    message = (
-                        f"🔔 Bot Status Update 🔔\n"
-                        f"Bot: `{instance_name}`\n"
-                        f"Pair: `{original_trade_data.get('trading_pair', 'UNKNOWN')}`\n"
-                        f"Status: Stopped (Removed from active trades)." # Simplified reason
-                    )
-                    await self._notifier.notify(
-                        original_trade_data.get('chat_id'),
-                        message_type="bot_status_update",
-                        instance_name=instance_name,
-                        trading_pair=original_trade_data.get('trading_pair', 'UNKNOWN'),
-                        status="stopped",
-                        stop_reason="Removed from active trades"
-                    )
-                    self._last_active_message_time.pop(instance_name, None)
-            else:
-                updated_active_trades.append(trade)
-
-        # 4. Identify and add newly started bots to local storage
+        # 3. Identify and add newly started bots to local storage
         bots_to_add = running_bot_names - active_trade_names
         for instance_name in bots_to_add:
             print(f"New bot '{instance_name}' detected. Adding to active trades.")
             bot_detail = running_bot_details.get(instance_name, {})
-            # Extract relevant trade data from bot_detail
-            # This assumes the 'data' key exists and contains the necessary info
-            trade_data_from_api = bot_detail.get('data', {})
             new_trade_data = {
                 "instance_name": instance_name,
-                "chat_id": self._notifier._messenger.TELEGRAM_CHAT_ID, # Use the chat ID from the messenger
-                "trading_pair": trade_data_from_api.get('trading_pair', 'UNKNOWN'),
-                "order_amount_usd": trade_data_from_api.get('order_amount_usd', 0),
-                "trailing_stop_loss_delta": trade_data_from_api.get('trailing_stop_loss_delta', 0),
-                "take_profit_delta": trade_data_from_api.get('take_profit_delta', 0),
-                "fixed_stop_loss_delta": trade_data_from_api.get('fixed_stop_loss_delta', 0)
+                "chat_id": self._notifier._messenger.TELEGRAM_CHAT_ID,
+                "trading_pair": bot_detail.get('trading_pair', 'UNKNOWN'),
+                "order_amount_usd": bot_detail.get('order_amount_usd', 0),
+                "trailing_stop_loss_delta": bot_detail.get('trailing_stop_loss_delta', 0),
+                "take_profit_delta": bot_detail.get('take_profit_delta', 0),
+                "fixed_stop_loss_delta": bot_detail.get('fixed_stop_loss_delta', 0)
             }
-            updated_active_trades.append(new_trade_data) # Add to the in-memory list
+            active_trades.append(new_trade_data) # Add to the in-memory list
+            print(f"DEBUG: _synchronize_active_trades - Added new_trade_data: {new_trade_data}")
+            print(f"DEBUG: _synchronize_active_trades - active_trades (after adding): {active_trades}")
             # Optionally, send a notification that a new bot started
 
-        # Save the fully synchronized list back to storage
-        self._trade_storage.save_trades(updated_active_trades)
+        # Save the updated list back to storage
+        self._trade_storage.save_trades(active_trades)
 
-        # Return the updated list of active trades
-        return updated_active_trades
+        # Return the updated list of active trades AND the bot status data with logs
+        print(f"DEBUG: _synchronize_active_trades - Returning active_trades: {active_trades}")
+        return active_trades, all_bot_statuses_data
 
     async def _parse_trade_logs_and_notify(self, chat_id: str, instance_name: str, general_logs: List[Dict[str, Any]]):
         """Parses general logs for trade events and sends notifications."""
         if instance_name not in self._last_processed_trade_logs:
             self._last_processed_trade_logs[instance_name] = set()
 
+        print(f"DEBUG: _parse_trade_logs_and_notify received general_logs for {instance_name}: {general_logs}")
         for log_entry in general_logs:
             log_msg = log_entry.get('msg', '')
             log_timestamp = log_entry.get('timestamp', '')
+            print(f"DEBUG: Processing log entry: {log_msg}")
 
             # Regex to capture trade fill messages
             # Example: "Trade fill: 0.001 ETH-USDT BUY at 1800.0"
@@ -287,6 +259,7 @@ class BotMonitor:
                 trade_type, amount, base_asset, price, quote_asset = trade_match.groups()
                 trading_pair = f"{base_asset}-{quote_asset}"
                 trade_identifier = f"{instance_name}-{trading_pair}-{trade_type}-{amount}-{price}-{log_timestamp}"
+                print(f"DEBUG: Trade match found for {instance_name}. Identifier: {trade_identifier}")
 
                 if trade_identifier not in self._last_processed_trade_logs[instance_name]:
                     print(f"New trade detected for {instance_name}: {log_msg}")
@@ -301,58 +274,107 @@ class BotMonitor:
                         timestamp=log_timestamp
                     )
                     self._last_processed_trade_logs[instance_name].add(trade_identifier)
+                else:
+                    print(f"DEBUG: Trade {trade_identifier} already processed for {instance_name}. Skipping notification.")
+            else:
+                print(f"DEBUG: No trade match found for log entry: {log_msg}")
 
-    async def _process_active_trades(self, active_trades: List[Dict[str, Any]]):
+    async def _process_active_trades(self, active_trades: List[Dict[str, Any]], bot_statuses_data: Dict[str, Any]):
         """
-        Processes each active trade by checking its status and handling accordingly.
+        Processes each active trade by checking its status, handling notifications,
+        and determining if it should be archived and removed.
         """
+        trades_to_keep = []
+        print(f"DEBUG: Entering _process_active_trades with {len(active_trades)} active trades.")
         for trade in active_trades:
             instance_name = trade.get('instance_name')
-            chat_id = trade.get('chat_id') # Get chat_id here for trade notifications
+            chat_id = trade.get('chat_id')
             if not instance_name:
-                print(f"Skipping trade with missing instance_name: {trade}")
+                print(f"DEBUG: Skipping trade with missing instance_name: {trade}")
                 continue
 
             try:
-                success, status_response_data = await self._hummingbot_manager.get_bot_status(instance_name)
-                if not success:
-                    print(f"Failed to get status for bot '{instance_name}': {status_response_data.get('error', 'Unknown error')}")
-                    continue
+                # Use the bot status data we already have from get_all_bot_statuses()
+                # instead of making another API call that might have incomplete data
+                status_response_data = bot_statuses_data.get(instance_name, {})
+                
+                # Debug: print the entire response structure to understand where logs are
+                print(f"DEBUG: Full status_response_data structure for {instance_name}: {status_response_data}")
+                
+                general_logs = status_response_data.get('general_logs', [])
+                error_logs = status_response_data.get('error_logs', [])
+                bot_actual_status = status_response_data.get('status')
 
-                bot_actual_status = status_response_data.get('data', {}).get('status')
-                general_logs = status_response_data.get('data', {}).get('general_logs', []) # Get general logs
                 print(f"Bot '{instance_name}' actual status: {bot_actual_status}")
+                print(f"DEBUG: general_logs length: {len(general_logs)}")
 
-                # Always parse trade logs for running bots
+                # Always parse trade logs for any active bot, regardless of its current status
+                # This ensures trade notifications are sent even if the bot stopped unexpectedly
+                await self._parse_trade_logs_and_notify(chat_id, instance_name, general_logs)
+
+                print(f"DEBUG: Bot '{instance_name}' status is '{bot_actual_status}'.")
+
                 if bot_actual_status == "running":
-                    await self._parse_trade_logs_and_notify(chat_id, instance_name, general_logs)
-
-                if bot_actual_status == "stopped":
-                    # Notification for stopped bot is now handled by _synchronize_active_trades
-                    # if it was removed from the active_trades list.
-                    # This branch would only be hit if a bot stopped *after* synchronization
-                    # but before the next cycle, and was still in the active_trades list.
-                    # In this case, we still want to notify.
-                    await self._handle_stopped_bot(trade, instance_name, status_response_data)
-                elif bot_actual_status == "running":
+                    print(f"DEBUG: Calling _handle_running_bot for {instance_name}")
                     await self._handle_running_bot(trade, instance_name, status_response_data)
+                    trades_to_keep.append(trade) # Keep running bots in active_trades
+                elif bot_actual_status == "stopped":
+                    stop_reason = await self._determine_stop_reason(general_logs, error_logs)
+                    if stop_reason == "Trade Completed":
+                        print(f"DEBUG: Bot '{instance_name}' stopped due to 'Trade Completed'. Archiving and removing.")
+                        await self._hummingbot_manager.stop_and_archive_bot(instance_name)
+                        self._trade_storage.remove_trade_entry(instance_name) # Remove from local storage
+                        print(f"DEBUG: Calling _handle_stopped_bot for {instance_name} (Trade Completed)")
+                        await self._handle_stopped_bot(trade, instance_name, status_response_data) # Send final notification
+                    else:
+                        print(f"DEBUG: Bot '{instance_name}' stopped for reason: '{stop_reason}'. Keeping in active trades for monitoring.")
+                        print(f"DEBUG: Calling _handle_stopped_bot for {instance_name} (Not Trade Completed)")
+                        await self._handle_stopped_bot(trade, instance_name, status_response_data) # Send notification
+                        trades_to_keep.append(trade) # Keep in active_trades if not completed
                 elif bot_actual_status == "not_found":
-                    # Notification for not found bot is now handled by _synchronize_active_trades
-                    # if it was removed from the active_trades list.
-                    # Similar to stopped bots, this branch handles cases where it's still in the list.
-                    await self._handle_not_found_bot(trade, instance_name)
+                    # If bot is not found, check if it completed trade or is truly gone
+                    stop_reason = await self._determine_stop_reason(general_logs, error_logs)
+                    if stop_reason == "Trade Completed":
+                        print(f"DEBUG: Bot '{instance_name}' not found but logs indicate 'Trade Completed'. Archiving and removing.")
+                        await self._hummingbot_manager.stop_and_archive_bot(instance_name) # Ensure archived
+                        self._trade_storage.remove_trade_entry(instance_name)
+                        print(f"DEBUG: Calling _handle_not_found_bot for {instance_name} (Trade Completed)")
+                        await self._handle_not_found_bot(trade, instance_name) # Send final notification
+                    else:
+                        print(f"DEBUG: Bot '{instance_name}' not found and trade not completed. Archiving and removing.")
+                        await self._hummingbot_manager.stop_and_archive_bot(instance_name) # Ensure archived
+                        self._trade_storage.remove_trade_entry(instance_name)
+                        print(f"DEBUG: Calling _handle_not_found_bot for {instance_name} (Not Trade Completed)")
+                        await self._handle_not_found_bot(trade, instance_name) # Send notification
+                elif bot_actual_status == "success":
+                    # 'success' status indicates the bot completed successfully
+                    print(f"DEBUG: Bot '{instance_name}' status is 'success' - checking for trade completion.")
+                    stop_reason = await self._determine_stop_reason(general_logs, error_logs)
+                    if stop_reason == "Trade Completed":
+                        print(f"DEBUG: Bot '{instance_name}' completed successfully with trades. Archiving and removing.")
+                        await self._hummingbot_manager.stop_and_archive_bot(instance_name)
+                        self._trade_storage.remove_trade_entry(instance_name) # Remove from local storage
+                        print(f"DEBUG: Calling _handle_stopped_bot for {instance_name} (Success with Trade Completed)")
+                        await self._handle_stopped_bot(trade, instance_name, status_response_data) # Send final notification
+                    else:
+                        print(f"DEBUG: Bot '{instance_name}' completed successfully but unclear trade status. Keeping in active trades.")
+                        trades_to_keep.append(trade) # Keep if unclear
                 else:
-                    print(f"Unknown bot status for '{instance_name}': {bot_actual_status}")
+                    print(f"DEBUG: Unknown bot status for '{instance_name}': {bot_actual_status}. Keeping in active trades.")
+                    trades_to_keep.append(trade) # Keep unknown status bots for further checks
 
             except Exception as e:
                 error_message = f"Error checking status for bot '{instance_name}': {e}"
                 print(error_message)
-                # Send an error alert to the chat_id
                 await self._notifier.notify(
                     chat_id,
                     message=error_message,
                     message_type="error"
                 )
+                trades_to_keep.append(trade) # Keep in active_trades if an error occurred during processing
+
+        # Update the active_trades.json file with the trades that should remain active
+        self._trade_storage.save_trades(trades_to_keep)
 
     async def run(self):
         """Runs the main monitoring loop."""
@@ -361,12 +383,12 @@ class BotMonitor:
             while True:
                 print(f"[{self._time_provider()}] Checking active bots...")
 
-                active_trades = await self._synchronize_active_trades()
+                active_trades, bot_statuses_data = await self._synchronize_active_trades()
 
                 if not active_trades:
                     print("No active trades found after synchronization.")
                 else:
-                    await self._process_active_trades(active_trades)
+                    await self._process_active_trades(active_trades, bot_statuses_data)
 
                 await asyncio.sleep(self._check_interval_seconds)
         except asyncio.CancelledError:

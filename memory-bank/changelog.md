@@ -59,3 +59,5 @@
 -   Formatted `curr_volume` and `prev_volume_mean` as integers in Telegram alerts.
 -   Updated `README.md` with new features and setup instructions.
 -   Created `memory-bank` directory and `changelog.md`.
+
+[2025-08-20 19:45:15] - **Fix**: Resolved premature bot archiving and ensured correct archiving upon trade completion. Refactored `BotMonitor` to reuse comprehensive bot status data from `get_all_bot_statuses` to ensure accurate log processing and trade completion detection. Verified multi-bot handling.
