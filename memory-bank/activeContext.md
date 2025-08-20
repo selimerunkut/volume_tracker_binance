@@ -47,3 +47,4 @@ This file tracks the project's current status, including recent changes, current
 - `telegram_alerts.py`: Modified to use `TELEGRAM_BOT_TEST_MODE` environment variable for credential loading and to use `TelegramMessenger`.
 - `telegram_bot_handler.py`: Updated to use `TradeStorage` and `TelegramMessenger` instances.
 - `tests/test_bot_monitor.py`: Significant updates to mock `TelegramMessenger` and `TradeStorage`, and to adjust assertions for message content and `save_trades` calls.
+[2025-08-19 15:39:04] - Added new task: Enhance `bot_monitor.py` to send buy and sell messages in a parsable format, similar to bot status messages. This will likely involve extending `TelegramNotifier` and `TelegramMessenger` to handle new message types and extracting relevant information from Hummingbot logs or API responses.

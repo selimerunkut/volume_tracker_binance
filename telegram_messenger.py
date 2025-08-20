@@ -135,11 +135,25 @@ class TelegramMessenger:
         message = f"❌ An error occurred: {error_details}"
         return await self._send_message(chat_id, message, dry_run=dry_run)
 
-    async def send_restricted_button_message(self, chat_id: str, symbol: str, message_text: str, dry_run: bool = False):
-        """Sends a message with an inline button to restrict a symbol."""
-        keyboard = [[InlineKeyboardButton(f"Restrict {symbol}", callback_data=f"restrict_{symbol}")]]
-        reply_markup = InlineKeyboardMarkup(keyboard).to_json()
-        return await self._send_message(chat_id, message_text, reply_markup=reply_markup, dry_run=dry_run)
+    async def send_trade_update(self, chat_id: str, instance_name: str, trading_pair: str, trade_type: str, price: float, amount: float, timestamp: str, dry_run: bool = False):
+        """Sends a message for a new trade (buy/sell)."""
+        trade_emoji = "🟢 BUY" if trade_type.lower() == "buy" else "🔴 SELL"
+        message = (
+            f"📈 New Trade Alert! 📉\n"
+            f"Bot: `{instance_name}`\n"
+            f"Pair: `{trading_pair}`\n"
+            f"Type: `{trade_emoji}`\n"
+            f"Price: `{price}`\n"
+            f"Amount: `{amount}`\n"
+            f"Time: `{timestamp}`"
+        )
+        return await self._send_message(chat_id, message, dry_run=dry_run)
+
+async def send_restricted_button_message(self, chat_id: str, symbol: str, message_text: str, dry_run: bool = False):
+    """Sends a message with an inline button to restrict a symbol."""
+    keyboard = [[InlineKeyboardButton(f"Restrict {symbol}", callback_data=f"restrict_{symbol}")]]
+    reply_markup = InlineKeyboardMarkup(keyboard).to_json()
+    return await self._send_message(chat_id, message_text, reply_markup=reply_markup, dry_run=dry_run)
 
 
 if __name__ == "__main__":
@@ -164,6 +178,9 @@ if __name__ == "__main__":
 
         print(f"\nAttempting to send error message to '{test_chat_id}'")
         await messenger.send_error_message(test_chat_id, "Something went wrong with the API call.")
+
+        print(f"\nAttempting to send trade update message to '{test_chat_id}'")
+        await messenger.send_trade_update(test_chat_id, "test_bot_A", "SOL-USDT", "BUY", 150.25, 0.5, "2025-08-19 10:30:00")
 
 
     asyncio.run(test_messages())

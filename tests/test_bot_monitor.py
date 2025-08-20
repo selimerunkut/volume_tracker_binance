@@ -27,6 +27,7 @@ class TestBotMonitor(unittest.IsolatedAsyncioTestCase):
         self.mock_telegram_messenger.send_bot_status_update = AsyncMock(side_effect=self._mock_send_message)
         self.mock_telegram_messenger.send_bot_not_found_alert = AsyncMock(side_effect=self._mock_send_message)
         self.mock_telegram_messenger.send_error_message = AsyncMock(side_effect=self._mock_send_message)
+        self.mock_telegram_messenger.send_trade_update = AsyncMock(side_effect=self._mock_send_message)
         self.mock_telegram_messenger.TELEGRAM_CHAT_ID = "12345" # Mock the chat ID for new bot addition logic
 
         # Initialize TelegramNotifier with the mocked TelegramMessenger
@@ -62,9 +63,9 @@ class TestBotMonitor(unittest.IsolatedAsyncioTestCase):
 
     async def _mock_send_message(self, chat_id, *args, **kwargs):
         # This mock captures all messages sent via TelegramMessenger methods
-        # Store the kwargs directly for assertion
-        self._sent_messages.append({"chat_id": chat_id, "kwargs": kwargs})
-        print(f"MOCK TELEGRAM: Chat ID: {chat_id}, Kwargs: {kwargs}") # For debugging tests
+        # Store both args and kwargs for assertion
+        self._sent_messages.append({"chat_id": chat_id, "args": args, "kwargs": kwargs})
+        print(f"MOCK TELEGRAM: Chat ID: {chat_id}, Args: {args}, Kwargs: {kwargs}") # For debugging tests
 
     async def test_no_active_trades(self):
         self._active_trades_data = []
@@ -331,9 +332,13 @@ class TestBotMonitor(unittest.IsolatedAsyncioTestCase):
         with patch('asyncio.sleep', new=AsyncMock(side_effect=asyncio.CancelledError)):
             await self.bot_monitor.run()
             self.mock_hummingbot_manager.get_bot_status.assert_called_once_with('test_bot_6')
-            self.assertEqual(len(self._sent_messages), 1) # Expect 1 message for error
-            self.assertEqual(self._sent_messages[0]['kwargs']['message'], "Error checking status for bot 'test_bot_6': API connection error")
-            self.assertEqual(self._sent_messages[0]['kwargs']['message_type'], "error")
+            self.mock_telegram_messenger.send_error_message.assert_called_once_with(
+                "12345",
+                "Error checking status for bot 'test_bot_6': API connection error"
+            )
+            self.assertEqual(len(self._sent_messages), 1) # Now expects one message due to _mock_send_message side effect
+            self.assertEqual(self._sent_messages[0]['chat_id'], "12345")
+            self.assertEqual(self._sent_messages[0]['args'][0], "Error checking status for bot 'test_bot_6': API connection error")
             self.assertEqual(len(self._active_trades_data), 1) # Trade should not be removed
 
     async def test_missing_instance_name_in_trade(self):
@@ -389,11 +394,186 @@ class TestBotMonitor(unittest.IsolatedAsyncioTestCase):
             # The bot should be removed from active trades and archived
             self.mock_hummingbot_manager.stop_and_archive_bot.assert_called_once_with(instance_name)
             self.trade_storage.save_trades.assert_called_once_with([])
-            self.assertEqual(len(self._sent_messages), 1)
-            self.assertEqual(self._sent_messages[0]['kwargs']['instance_name'], instance_name)
-            self.assertEqual(self._sent_messages[0]['kwargs']['status'], 'stopped')
-            self.assertEqual(self._sent_messages[0]['kwargs']['stop_reason'], 'Removed from active trades')
+            self.mock_telegram_messenger.send_bot_status_update.assert_called_once_with(
+                chat_id,
+                instance_name=instance_name,
+                trading_pair=trading_pair,
+                status="stopped",
+                stop_reason="Removed from active trades"
+            )
             self.assertEqual(len(self._active_trades_data), 0) # Should be removed
+
+    async def test_trade_log_parsing_and_notification(self):
+        instance_name = "buy_sell_trailing_stop_bot_ETH_USDC_887un33i"
+        trading_pair = "ETH-USDC"
+        chat_id = "12345"
+
+        # Provided log data, restructured to match get_bot_status return format
+        log_data = {
+            "status": "success",
+            "data": {
+                "status": "running", # This is the status that bot_monitor.py will read
+                "performance": {},
+                "error_logs": [],
+                "general_logs": [
+                    {
+                        "level_name": "INFO",
+                        "msg": "Starting Node <hbot.buy_sell_trailing_stop_bot_ETH_USDC_887un33i>",
+                        "timestamp": 1755617433.580607,
+                        "level_no": 20,
+                        "logger_name": "hummingbot.remote_iface.mqtt"
+                    },
+                    {
+                        "level_name": "INFO",
+                        "msg": "Placing initial MARKET BUY order x-MG43PCSNBEHUC63cb989c0e3ff9293 for 0.0014 ETH-USDC.",
+                        "timestamp": 1755617438.0007524,
+                        "level_no": 20,
+                        "logger_name": "hummingbot.strategy.script_strategy_base"
+                    },
+                    {
+                        "level_name": "INFO",
+                        "msg": "Created MARKET BUY order x-MG43PCSNBEHUC63cb989c0e3ff9293 for 0.00140000 ETH-USDC at 4231.99500000.",
+                        "timestamp": 1755617438.2728572,
+                        "level_no": 20,
+                        "logger_name": "hummingbot.connector.client_order_tracker"
+                    },
+                    {
+                        "level_name": "INFO",
+                        "msg": "The BUY order x-MG43PCSNBEHUC63cb989c0e3ff9293 amounting to 0.00140000/0.00140000 ETH has been filled at 4231.60000000 USDC.",
+                        "timestamp": 1755617438.3017592,
+                        "level_no": 20,
+                        "logger_name": "hummingbot.connector.client_order_tracker"
+                    },
+                    {
+                        "level_name": "INFO",
+                        "msg": "Buy order x-MG43PCSNBEHUC63cb989c0e3ff9293 filled. Entry price: 4231.6000.",
+                        "timestamp": 1755617438.3195934,
+                        "level_no": 20,
+                        "logger_name": "hummingbot.strategy.script_strategy_base"
+                    },
+                    {
+                        "level_name": "INFO",
+                        "msg": "BUY order x-MG43PCSNBEHUC63cb989c0e3ff9293 completely filled.",
+                        "timestamp": 1755617438.3455045,
+                        "level_no": 20,
+                        "logger_name": "hummingbot.connector.client_order_tracker"
+                    },
+                    {
+                        "level_name": "INFO",
+                        "msg": "Fixed stop loss hit for order x-MG43PCSNBEHUC63cb989c0e3ff9293. Initiating sell for remaining position.",
+                        "timestamp": 1755617442.0039496,
+                        "level_no": 20,
+                        "logger_name": "hummingbot.strategy.script_strategy_base"
+                    },
+                    {
+                        "level_name": "INFO",
+                        "msg": "Placing retry SELL order x-MG43PCSNSEHUC63cb989fdffcf9293 for 0.0014 ETH-USDC.",
+                        "timestamp": 1755617442.0053575,
+                        "level_no": 20,
+                        "logger_name": "hummingbot.strategy.script_strategy_base"
+                    },
+                    {
+                        "level_name": "INFO",
+                        "msg": "Created MARKET SELL order x-MG43PCSNSEHUC63cb989fdffcf9293 for 0.00140000 ETH-USDC at NaN.",
+                        "timestamp": 1755617442.278867,
+                        "level_no": 20,
+                        "logger_name": "hummingbot.connector.client_order_tracker"
+                    },
+                    {
+                        "level_name": "INFO",
+                        "msg": "The SELL order x-MG43PCSNSEHUC63cb989fdffcf9293 amounting to 0.00140000/0.00140000 ETH has been filled at 4230.18000000 USDC.",
+                        "timestamp": 1755617442.3020942,
+                        "level_no": 20,
+                        "logger_name": "hummingbot.connector.client_order_tracker"
+                    },
+                    {
+                        "level_name": "INFO",
+                        "msg": "Sell order x-MG43PCSNSEHUC63cb989fdffcf9293 fully filled. Position closed for original buy order x-MG43PCSNBEHUC63cb989c0e3ff9293.",
+                        "timestamp": 1755617442.317745,
+                        "level_no": 20,
+                        "logger_name": "hummingbot.strategy.script_strategy_base"
+                    },
+                    {
+                        "level_name": "INFO",
+                        "msg": "All positions closed. Stopping the strategy.",
+                        "timestamp": 1755617442.318216,
+                        "level_no": 20,
+                        "logger_name": "hummingbot.strategy.script_strategy_base"
+                    },
+                    {
+                        "level_name": "INFO",
+                        "msg": "SELL order x-MG43PCSNSEHUC63cb989fdffcf9293 completely filled.",
+                        "timestamp": 1755617442.3407094,
+                        "level_no": 20,
+                        "logger_name": "hummingbot.connector.client_order_tracker"
+                    }
+                ],
+                "recently_active": True,
+                "source": "docker"
+            }
+        }
+
+        # Mock get_bot_status to return the provided log data
+        self.mock_hummingbot_manager.get_bot_status.return_value = (True, log_data)
+
+        # Simulate an active trade for the bot
+        trade_entry = {
+            'instance_name': instance_name,
+            'chat_id': chat_id,
+            'trading_pair': trading_pair
+        }
+        self._active_trades_data = [trade_entry]
+
+        # Mock get_all_bot_statuses to ensure the bot is considered active
+        self.mock_hummingbot_manager.get_all_bot_statuses.return_value = {
+            "status": "success",
+            "data": {
+                instance_name: {
+                    'instance_name': instance_name,
+                    'status': 'running',
+                    'data': {
+                        'status': 'running',
+                        'trading_pair': trading_pair,
+                        'order_amount_usd': 100,
+                        'trailing_stop_loss_delta': 0.001,
+                        'take_profit_delta': 0.002,
+                        'fixed_stop_loss_delta': 0.0005
+                    }
+                }
+            }
+        }
+
+        # Run the monitor for one cycle
+        with patch('asyncio.sleep', new=AsyncMock(side_effect=asyncio.CancelledError)):
+            await self.bot_monitor.run()
+
+        # Assertions for BUY trade
+        self.assertEqual(self.mock_telegram_messenger.send_trade_update.call_count, 2) # Expecting two trade messages (BUY and SELL)
+
+        # Assert BUY message
+        buy_call_args = self.mock_telegram_messenger.send_trade_update.call_args_list[0].args
+        buy_call_kwargs = self.mock_telegram_messenger.send_trade_update.call_args_list[0].kwargs
+        self.assertEqual(buy_call_args[0], chat_id)
+        self.assertEqual(buy_call_kwargs['instance_name'], instance_name)
+        self.assertEqual(buy_call_kwargs['trading_pair'], trading_pair)
+        self.assertEqual(buy_call_kwargs['trade_type'], 'BUY')
+        self.assertAlmostEqual(buy_call_kwargs['price'], 4231.60)
+        self.assertAlmostEqual(buy_call_kwargs['amount'], 0.0014)
+        self.assertEqual(buy_call_kwargs['timestamp'], 1755617438.3017592)
+
+        # Assert SELL message
+        sell_call_args = self.mock_telegram_messenger.send_trade_update.call_args_list[1].args
+        sell_call_kwargs = self.mock_telegram_messenger.send_trade_update.call_args_list[1].kwargs
+        self.assertEqual(sell_call_args[0], chat_id)
+        self.assertEqual(sell_call_kwargs['instance_name'], instance_name)
+        self.assertEqual(sell_call_kwargs['trading_pair'], trading_pair)
+        self.assertEqual(sell_call_kwargs['trade_type'], 'SELL')
+        self.assertAlmostEqual(sell_call_kwargs['price'], 4230.18)
+        self.assertAlmostEqual(sell_call_kwargs['amount'], 0.0014)
+        self.assertEqual(str(sell_call_kwargs['timestamp']), '1755617442.3020942')
+
+        # Verify that _last_processed_trade_logs is correctly populated
+        self.assertEqual(len(self.bot_monitor._last_processed_trade_logs[instance_name]), 2)
 
 if __name__ == '__main__':
     unittest.main()

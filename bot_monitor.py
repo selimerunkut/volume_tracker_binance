@@ -41,6 +41,8 @@ class TelegramNotifier:
             await self._messenger.send_bot_status_update(chat_id, **kwargs)
         elif message_type == "bot_not_found_alert":
             await self._messenger.send_bot_not_found_alert(chat_id, **kwargs)
+        elif message_type == "trade_update":
+            await self._messenger.send_trade_update(chat_id, **kwargs)
         elif message_type == "error":
             await self._messenger.send_error_message(chat_id, message)
         else:
@@ -65,6 +67,7 @@ class BotMonitor:
         self._check_interval_seconds = check_interval_seconds
         self._time_provider = time_provider # Store the time provider
         self._last_active_message_time: Dict[str, datetime] = {}
+        self._last_processed_trade_logs: Dict[str, set] = {} # Stores a set of processed log hashes per instance
 
     async def _parse_bot_logs_for_info(self, general_logs: List[Dict[str, Any]]) -> Dict[str, str]:
         """Parses general logs for PnL and Open Orders information."""
@@ -265,12 +268,47 @@ class BotMonitor:
         # Return the updated list of active trades
         return updated_active_trades
 
+    async def _parse_trade_logs_and_notify(self, chat_id: str, instance_name: str, general_logs: List[Dict[str, Any]]):
+        """Parses general logs for trade events and sends notifications."""
+        if instance_name not in self._last_processed_trade_logs:
+            self._last_processed_trade_logs[instance_name] = set()
+
+        for log_entry in general_logs:
+            log_msg = log_entry.get('msg', '')
+            log_timestamp = log_entry.get('timestamp', '')
+
+            # Regex to capture trade fill messages
+            # Example: "Trade fill: 0.001 ETH-USDT BUY at 1800.0"
+            # Regex to capture trade fill messages based on actual Hummingbot logs
+            # Example: "The BUY order ... amounting to 0.00140000/0.00140000 ETH has been filled at 4231.60000000 USDC."
+            trade_match = re.search(r"(BUY|SELL) order .*? amounting to ([\d\.]+)/[\d\.]+ ([A-Z]+) has been filled at ([\d\.]+) ([A-Z]+)\.", log_msg)
+            
+            if trade_match:
+                trade_type, amount, base_asset, price, quote_asset = trade_match.groups()
+                trading_pair = f"{base_asset}-{quote_asset}"
+                trade_identifier = f"{instance_name}-{trading_pair}-{trade_type}-{amount}-{price}-{log_timestamp}"
+
+                if trade_identifier not in self._last_processed_trade_logs[instance_name]:
+                    print(f"New trade detected for {instance_name}: {log_msg}")
+                    await self._notifier.notify(
+                        chat_id,
+                        message_type="trade_update",
+                        instance_name=instance_name,
+                        trading_pair=trading_pair,
+                        trade_type=trade_type,
+                        price=float(price),
+                        amount=float(amount),
+                        timestamp=log_timestamp
+                    )
+                    self._last_processed_trade_logs[instance_name].add(trade_identifier)
+
     async def _process_active_trades(self, active_trades: List[Dict[str, Any]]):
         """
         Processes each active trade by checking its status and handling accordingly.
         """
         for trade in active_trades:
             instance_name = trade.get('instance_name')
+            chat_id = trade.get('chat_id') # Get chat_id here for trade notifications
             if not instance_name:
                 print(f"Skipping trade with missing instance_name: {trade}")
                 continue
@@ -282,7 +320,12 @@ class BotMonitor:
                     continue
 
                 bot_actual_status = status_response_data.get('data', {}).get('status')
+                general_logs = status_response_data.get('data', {}).get('general_logs', []) # Get general logs
                 print(f"Bot '{instance_name}' actual status: {bot_actual_status}")
+
+                # Always parse trade logs for running bots
+                if bot_actual_status == "running":
+                    await self._parse_trade_logs_and_notify(chat_id, instance_name, general_logs)
 
                 if bot_actual_status == "stopped":
                     # Notification for stopped bot is now handled by _synchronize_active_trades
@@ -306,7 +349,7 @@ class BotMonitor:
                 print(error_message)
                 # Send an error alert to the chat_id
                 await self._notifier.notify(
-                    trade.get('chat_id'),
+                    chat_id,
                     message=error_message,
                     message_type="error"
                 )
