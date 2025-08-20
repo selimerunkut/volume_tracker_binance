@@ -84,3 +84,4 @@ This file tracks the project's progress using a task list format.
 [2025-08-19 15:38:54] - New task added: `bot_monitor.py` needs to send buy and sell messages that can be parsed like bot status messages.
 [2025-08-20 18:08:00] - Completed debugging and fixing test failures in `tests/test_bot_monitor.py`. Resolved timestamp type mismatch and assertion issues.
 [2025-08-20 19:44:54] - Completed fix for premature bot archiving and verified multi-bot handling.
+[2025-08-20 20:32:38] - Completed debugging and validation of `simulate_trade_logs.py`. The simulation now accurately reflects the `BotMonitor`'s behavior, including the handling of "stopped" bots with "Unknown Reason" (keeping them in active monitoring).

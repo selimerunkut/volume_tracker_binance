@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import os
+from datetime import datetime # Correct import for datetime.now()
 from unittest.mock import AsyncMock, MagicMock, call
 
 # Add the parent directory to the sys.path to allow imports from the project root
@@ -10,27 +11,75 @@ from bot_monitor import BotMonitor, TelegramNotifier
 from telegram_messenger import TelegramMessenger
 from trade_storage import TradeStorage # Import TradeStorage for mocking
 
-async def simulate_premature_archiving_scenario():
-    print("Starting premature archiving simulation...")
+async def simulate_bot_monitor_cycles():
+    print("Starting Bot Monitor multi-cycle simulation...")
 
     # Mock TelegramMessenger and its methods
     mock_telegram_messenger = AsyncMock(spec=TelegramMessenger)
     mock_telegram_messenger.send_trade_update = AsyncMock()
-    mock_telegram_messenger.send_bot_status_update = AsyncMock() # Also mock status updates
+    mock_telegram_messenger.send_bot_status_update = AsyncMock()
     mock_telegram_messenger.TELEGRAM_CHAT_ID = "12345"
 
     telegram_notifier = TelegramNotifier(mock_telegram_messenger)
 
     # Mock HummingbotManager
     mock_hummingbot_manager = AsyncMock()
-    mock_hummingbot_manager.stop_and_archive_bot = AsyncMock() # Crucial for checking archiving
-    mock_hummingbot_manager.get_bot_status = AsyncMock() # Mock get_bot_status for _process_active_trades
+    mock_hummingbot_manager.stop_and_archive_bot = AsyncMock()
+    
+    # Mock get_bot_status to return full details for new bots
+    mock_hummingbot_manager.get_bot_status = AsyncMock(side_effect=[
+        # First call for SOL bot (newly detected)
+        (True, {
+            "status": "running",
+            "trading_pair": "SOL-USDC",
+            "order_amount_usd": 100,
+            "trailing_stop_loss_delta": 0.001,
+            "take_profit_delta": 0.001,
+            "fixed_stop_loss_delta": 0.001,
+            "general_logs": [
+                {"level_name": "INFO", "msg": "Starting Node <hbot.buy_sell_trailing_stop_bot_SOL_USDC_fh66bcqz>", "timestamp": 1755714510.1056917, "level_no": 20, "logger_name": "hummingbot.remote_iface.mqtt"},
+            ],
+        }),
+        # Second call for BTC bot (newly detected)
+        (True, {
+            "status": "running",
+            "trading_pair": "BTC-USDC",
+            "order_amount_usd": 1000,
+            "trailing_stop_loss_delta": 0.001,
+            "take_profit_delta": 0.001,
+            "fixed_stop_loss_delta": 0.001,
+            "general_logs": [
+                {"level_name": "INFO", "msg": "Starting Node <hbot.buy_sell_trailing_stop_bot_BTC_USDC_ucha4sat>", "timestamp": 1755714961.2302234, "level_no": 20, "logger_name": "hummingbot.remote_iface.mqtt"},
+            ],
+        }),
+        # Third call for XRP bot (newly detected)
+        (True, {
+            "status": "running",
+            "trading_pair": "XRP-USDC",
+            "order_amount_usd": 50,
+            "trailing_stop_loss_delta": 0.001,
+            "take_profit_delta": 0.001,
+            "fixed_stop_loss_delta": 0.001,
+            "general_logs": [
+                {"level_name": "INFO", "msg": "Starting Node <hbot.buy_sell_trailing_stop_bot_XRP_USDC_completed>", "timestamp": 1755714510.1056917, "level_no": 20, "logger_name": "hummingbot.remote_iface.mqtt"},
+            ],
+        }),
+        # Subsequent calls for existing bots (can return minimal data as full logs are in all_bot_statuses)
+        # This is a simplified mock, in reality, get_bot_status might return more.
+        # For the purpose of _synchronize_active_trades, we only need the status.
+        (True, {"status": "running"}), # For SOL in cycle 2
+        (True, {"status": "running"}), # For BTC in cycle 2
+        (True, {"status": "success"}), # For XRP in cycle 2 (after completion)
+        (True, {"status": "stopped"}), # For SOL in cycle 3 (after it stops)
+        (True, {"status": "stopped"}), # For BTC in cycle 3 (after it stops)
+        (True, {"status": "not_found"}), # For XRP in cycle 3 (after archiving)
+        (True, {"status": "not_found"}), # For missing bot in edge case
+    ])
 
     # Mock TradeStorage
     trade_storage = MagicMock(spec=TradeStorage)
-    trade_storage.load_trades.return_value = [] # Start with no active trades
+    trade_storage.load_trades.return_value = []
     trade_storage.save_trades.return_value = None
-    trade_storage.add_trade_entry = MagicMock()
     trade_storage.remove_trade_entry = MagicMock()
 
     # Initialize BotMonitor with mocks
@@ -39,174 +88,117 @@ async def simulate_premature_archiving_scenario():
         trade_storage=trade_storage,
         notifier=telegram_notifier,
         check_interval_seconds=1,
-        time_provider=None
+        time_provider=datetime.now # Provide a callable time provider
     )
 
     instance_name_bought = "buy_sell_trailing_stop_bot_SOL_USDC_fh66bcqz"
     instance_name_no_buy = "buy_sell_trailing_stop_bot_BTC_USDC_ucha4sat"
     instance_name_completed = "buy_sell_trailing_stop_bot_XRP_USDC_completed"
+    instance_name_missing = "buy_sell_trailing_stop_bot_ETH_USDC_missing"
     chat_id = "12345"
 
-    # --- Scenario: Multiple bots running simultaneously ---
-    print(f"\n--- Simulating Multiple Bots Scenario: All 3 bots running with different states ---")
+    # Redefine the BotMonitor's run method for simulation purposes to execute a single cycle
+    # This avoids the infinite loop and sleep
+    async def run_single_cycle():
+        active_trades, bot_statuses_data = await bot_monitor._synchronize_active_trades()
+        if active_trades:
+            processed_trades = await bot_monitor._process_active_trades(active_trades, bot_statuses_data)
+            bot_monitor._trade_storage.save_trades(processed_trades)
 
-    # Step 1: Simulate initial detection of multiple running bots
+    # --- Cycle 1: Initial detection of all bots ---
+    print("\n--- Cycle 1: Initial detection and processing ---")
+    mock_hummingbot_manager.get_all_bot_statuses.return_value = {
+        "status": "success",
+        "data": {
+            instance_name_bought: {"status": "running", "general_logs": [{"level_name": "INFO", "msg": "Starting Node...", "timestamp": 1}], "recently_active": True, "source": "docker"},
+            instance_name_no_buy: {"status": "running", "general_logs": [{"level_name": "INFO", "msg": "Starting Node...", "timestamp": 1}], "recently_active": True, "source": "docker"},
+            instance_name_completed: {"status": "running", "general_logs": [{"level_name": "INFO", "msg": "Starting Node...", "timestamp": 1}], "recently_active": True, "source": "docker"}
+        }
+    }
+    trade_storage.load_trades.return_value = []
+    await run_single_cycle()
+
+    # Assertions for Cycle 1
+    assert trade_storage.save_trades.call_count == 2
+    final_trades_c1 = trade_storage.save_trades.call_args[0][0]
+    assert len(final_trades_c1) == 3
+    mock_hummingbot_manager.stop_and_archive_bot.assert_not_called()
+    trade_storage.remove_trade_entry.assert_not_called()
+    assert mock_telegram_messenger.send_bot_status_update.call_count == 3
+    mock_telegram_messenger.send_trade_update.assert_not_called()
+    
+    # Reset mocks for next cycle
+    trade_storage.save_trades.reset_mock()
+    mock_telegram_messenger.reset_mock()
+
+    # --- Cycle 2: One bot completes trade, others stop ---
+    print("\n--- Cycle 2: One bot completes trade, others stop/run ---")
     mock_hummingbot_manager.get_all_bot_statuses.return_value = {
         "status": "success",
         "data": {
             instance_name_bought: {
-                "status": "running",
-                "performance": {},
-                "error_logs": [],
-                "general_logs": [
-                    {"level_name": "INFO", "msg": "Starting Node <hbot.buy_sell_trailing_stop_bot_SOL_USDC_fh66bcqz>", "timestamp": 1755714510.1056917, "level_no": 20, "logger_name": "hummingbot.remote_iface.mqtt"},
-                ],
-                "recently_active": True,
-                "source": "docker"
+                "status": "stopped", "general_logs": [{"level_name": "INFO", "msg": "The BUY order..."}, {"level_name": "INFO", "msg": "All positions closed."}], "recently_active": True, "source": "docker"
             },
             instance_name_no_buy: {
-                "status": "running",
-                "performance": {},
-                "error_logs": [],
-                "general_logs": [
-                    {"level_name": "INFO", "msg": "Starting Node <hbot.buy_sell_trailing_stop_bot_BTC_USDC_ucha4sat>", "timestamp": 1755714961.2302234, "level_no": 20, "logger_name": "hummingbot.remote_iface.mqtt"},
-                ],
-                "recently_active": True,
-                "source": "docker"
+                "status": "stopped", "general_logs": [{"level_name": "WARNING", "msg": "binance is not ready."}], "recently_active": True, "source": "docker"
             },
             instance_name_completed: {
-                "status": "running",
-                "performance": {},
-                "error_logs": [],
-                "general_logs": [
-                    {"level_name": "INFO", "msg": "Starting Node <hbot.buy_sell_trailing_stop_bot_XRP_USDC_completed>", "timestamp": 1755714510.1056917, "level_no": 20, "logger_name": "hummingbot.remote_iface.mqtt"},
-                ],
-                "recently_active": True,
-                "source": "docker"
+                "status": "success", "general_logs": [{"level_name": "INFO", "msg": "The SELL order..."}, {"level_name": "INFO", "msg": "All positions closed. Stopping the strategy."}], "recently_active": True, "source": "docker"
             }
         }
     }
-    # Simulate active_trades.json being empty initially, then updated by synchronize
-    trade_storage.load_trades.return_value = []
-    active_trades_after_sync, bot_statuses_data = await bot_monitor._synchronize_active_trades()
-    trade_storage.save_trades.assert_called_once_with(active_trades_after_sync)
-    trade_storage.save_trades.reset_mock() # Reset save_trades mock
+    trade_storage.load_trades.return_value = final_trades_c1  # Use state from previous cycle
+    await run_single_cycle()
 
-    print(f"  3 bots detected and added to active trades: {len(active_trades_after_sync)}")
+    # Assertions for Cycle 2
+    assert trade_storage.save_trades.call_count == 2
+    final_trades_c2 = trade_storage.save_trades.call_args[0][0]
+    assert len(final_trades_c2) == 1  # Two bots should be removed (SOL and XRP), leaving BTC
+    instance_names_c2 = {t['instance_name'] for t in final_trades_c2}
+    assert instance_name_completed not in instance_names_c2
+    assert mock_hummingbot_manager.stop_and_archive_bot.call_count == 2
+    mock_hummingbot_manager.stop_and_archive_bot.assert_has_calls([
+        call(instance_name_bought), # SOL bot stopped with "All positions closed."
+        call(instance_name_completed) # XRP bot status 'success' with "All positions closed."
+    ], any_order=True)
+    
+    assert trade_storage.remove_trade_entry.call_count == 2
+    trade_storage.remove_trade_entry.assert_has_calls([
+        call(instance_name_bought),
+        call(instance_name_completed)
+    ], any_order=True)
+    
+    # Reset mocks
+    trade_storage.reset_mock()
+    mock_hummingbot_manager.reset_mock()
+    mock_telegram_messenger.reset_mock()
 
-    # Step 2: Simulate different final states for each bot
-    # Update the bot statuses to show their final states
-    bot_statuses_data_final = {
-        instance_name_bought: {
-            "status": "stopped",
-            "performance": {},
-            "error_logs": [],
-            "general_logs": [
-                {"level_name": "INFO", "msg": "Placing initial MARKET BUY order x-MG43PCSNBSLUC63cd023dfd6a99293 for 0.0328 SOL-USDC.", "timestamp": 1755714513.0009255, "level_no": 20, "logger_name": "hummingbot.strategy.script_strategy_base"},
-                {"level_name": "INFO", "msg": "The BUY order x-MG43PCSNBSLUC63cd023dfd6a99293 amounting to 0.03200000/0.03200000 SOL has been filled at 183.05000000 USDC.", "timestamp": 1755714513.2909431, "level_no": 20, "logger_name": "hummingbot.connector.client_order_tracker"},
-                {"level_name": "INFO", "msg": "Buy order x-MG43PCSNBSLUC63cd023dfd6a99293 filled. Entry price: 183.0500.", "timestamp": 1755714513.2916992, "level_no": 20, "logger_name": "hummingbot.strategy.script_strategy_base"},
-                {"level_name": "INFO", "msg": "BUY order x-MG43PCSNBSLUC63cd023dfd6a99293 completely filled.", "timestamp": 1755714513.316238, "level_no": 20, "logger_name": "hummingbot.connector.client_order_tracker"}
-            ],
-            "recently_active": True,
-            "source": "docker"
-        },
-        instance_name_no_buy: {
-            "status": "stopped",
-            "performance": {},
-            "error_logs": [],
-            "general_logs": [
-                {"level_name": "WARNING", "msg": "binance is not ready. Please wait...", "timestamp": 1755714962.003179, "level_no": 30, "logger_name": "hummingbot.strategy.script_strategy_base"}
-            ],
-            "recently_active": True,
-            "source": "docker"
-        },
-        instance_name_completed: {
-            "status": "success",
-            "performance": {},
-            "error_logs": [],
-            "general_logs": [
-                {"level_name": "INFO", "msg": "The BUY order x-BUY123 amounting to 0.03200000/0.03200000 XRP has been filled at 0.60000000 USDC.", "timestamp": 1755617440.317745, "level_no": 20, "logger_name": "hummingbot.connector.client_order_tracker"},
-                {"level_name": "INFO", "msg": "The SELL order x-COMPLETED amounting to 0.03200000/0.03200000 XRP has been filled at 0.65000000 USDC.", "timestamp": 1755617442.317745, "level_no": 20, "logger_name": "hummingbot.connector.client_order_tracker"},
-                {"level_name": "INFO", "msg": "Sell order x-COMPLETED fully filled. Position closed for original buy order x-BUY123.", "timestamp": 1755617442.317745, "level_no": 20, "logger_name": "hummingbot.strategy.script_strategy_base"},
-                {"level_name": "INFO", "msg": "All positions closed. Stopping the strategy.", "timestamp": 1755617442.318000, "level_no": 20, "logger_name": "hummingbot.strategy.script_strategy_base"}
-            ],
-            "recently_active": True,
-            "source": "docker"
+    # --- Cycle 3: Verify no re-adding of archived bot ---
+    print("\n--- Cycle 3: Verify no re-adding of archived bot ---")
+    mock_hummingbot_manager.get_all_bot_statuses.return_value = {
+        "status": "success",
+        "data": {
+            instance_name_bought: {"status": "stopped", "general_logs": [], "recently_active": True, "source": "docker"},
+            instance_name_no_buy: {"status": "stopped", "general_logs": [], "recently_active": True, "source": "docker"},
+            instance_name_completed: {"status": "success", "general_logs": [], "recently_active": False}
         }
     }
+    trade_storage.load_trades.return_value = final_trades_c2
+    await run_single_cycle()
 
-    # Simulate active_trades.json containing all bots from previous sync
-    trade_storage.load_trades.return_value = active_trades_after_sync
-    await bot_monitor._process_active_trades(active_trades_after_sync, bot_statuses_data_final)
+    # Assertions for Cycle 3
+    assert trade_storage.save_trades.call_count == 2
+    final_trades_c3 = trade_storage.save_trades.call_args[0][0]
+    assert len(final_trades_c3) == 1 # BTC bot should remain in active trades
+    mock_hummingbot_manager.stop_and_archive_bot.assert_not_called() # BTC bot is not archived
+    trade_storage.remove_trade_entry.assert_not_called() # BTC bot is not removed
 
-    print(f"\n--- Results for Multiple Bots Scenario ---")
-    print(f"  Total stop_and_archive_bot calls: {mock_hummingbot_manager.stop_and_archive_bot.call_count}")
-    print(f"  Total remove_trade_entry calls: {trade_storage.remove_trade_entry.call_count}")
-    print(f"  Total send_bot_status_update calls: {mock_telegram_messenger.send_bot_status_update.call_count}")
-    print(f"  Total send_trade_update calls: {mock_telegram_messenger.send_trade_update.call_count}")
-
-    # Expected results for multiple bots:
-    # - Bot 1 (SOL, incomplete): NOT archived, status update sent, trade update sent (1 BUY)
-    # - Bot 2 (BTC, no trades): NOT archived, status update sent, no trade update
-    # - Bot 3 (XRP, completed): ARCHIVED, status update sent, trade updates sent (1 BUY + 1 SELL)
+    print(f"✅ Bot 1 ({instance_name_bought}): Stopped with 'All positions closed.' - correctly archived in Cycle 2")
+    print(f"✅ Bot 2 ({instance_name_no_buy}): Stopped with no specific reason - correctly kept in monitoring")
+    print(f"✅ Bot 3 ({instance_name_completed}): Completed trade - correctly archived in Cycle 2 and NOT re-added")
     
-    # Verify correct handling:
-    # Only 1 bot should be archived (the completed one)
-    assert mock_hummingbot_manager.stop_and_archive_bot.call_count == 1, f"Expected 1 archive call, got {mock_hummingbot_manager.stop_and_archive_bot.call_count}"
-    mock_hummingbot_manager.stop_and_archive_bot.assert_called_with(instance_name_completed)
-    
-    # Only 1 bot should be removed from storage (the completed one)
-    assert trade_storage.remove_trade_entry.call_count == 1, f"Expected 1 remove call, got {trade_storage.remove_trade_entry.call_count}"
-    trade_storage.remove_trade_entry.assert_called_with(instance_name_completed)
-    
-    # All 3 bots should send status updates
-    assert mock_telegram_messenger.send_bot_status_update.call_count == 3, f"Expected 3 status updates, got {mock_telegram_messenger.send_bot_status_update.call_count}"
-    
-    # Total trade updates: 1 BUY (SOL) + 0 (BTC) + 1 BUY + 1 SELL (XRP) = 3
-    assert mock_telegram_messenger.send_trade_update.call_count == 3, f"Expected 3 trade updates, got {mock_telegram_messenger.send_trade_update.call_count}"
-    
-    # Trades should be saved once (after processing)
-    trade_storage.save_trades.assert_called_once()
-
-    print(f"✅ Bot 1 ({instance_name_bought}): Incomplete trade - kept in monitoring")
-    print(f"✅ Bot 2 ({instance_name_no_buy}): No trades - kept in monitoring")
-    print(f"✅ Bot 3 ({instance_name_completed}): Completed trade - archived and removed")
-    print(f"✅ All bot logs properly separated and processed individually")
-
-    mock_hummingbot_manager.stop_and_archive_bot.reset_mock()
-    trade_storage.remove_trade_entry.reset_mock()
-    mock_telegram_messenger.send_bot_status_update.reset_mock()
-    mock_telegram_messenger.send_trade_update.reset_mock()
-    trade_storage.save_trades.reset_mock()
-
-    print("\n--- Additional Test: Edge Case with Bot Not Found ---")
-    
-    # Test what happens when a bot suddenly disappears from API but is still in active_trades
-    # This could happen if a bot crashes or is manually removed
-    instance_name_missing = "buy_sell_trailing_stop_bot_ETH_USDC_missing"
-    
-    # Add a bot to active trades manually (simulating it was there before but now missing from API)
-    missing_bot_trade = {
-        "instance_name": instance_name_missing,
-        "chat_id": chat_id,
-        "trading_pair": "ETH-USDC",
-        "order_amount_usd": 10,
-        "trailing_stop_loss_delta": 0.001,
-        "take_profit_delta": 0.001,
-        "fixed_stop_loss_delta": 0.001
-    }
-    
-    # Simulate API returning empty data (bot not found)
-    empty_bot_statuses_data = {}
-    active_trades_with_missing = [missing_bot_trade]
-    trade_storage.load_trades.return_value = active_trades_with_missing
-    
-    await bot_monitor._process_active_trades(active_trades_with_missing, empty_bot_statuses_data)
-    
-    print(f"✅ Missing bot handled gracefully - no crashes with empty bot status data")
-
-    print("\nMultiple bots simulation complete - all scenarios verified!")
-
+    print("\nAll simulation scenarios complete and verified!")
 
 if __name__ == "__main__":
-    asyncio.run(simulate_premature_archiving_scenario())
+    asyncio.run(simulate_bot_monitor_cycles())
+

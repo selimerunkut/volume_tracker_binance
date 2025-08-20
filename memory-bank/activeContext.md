@@ -52,3 +52,4 @@ This file tracks the project's current status, including recent changes, current
 [2025-08-20 19:45:23] - **Current Focus**: Verified and fixed bot archiving logic, ensuring correct behavior for single and multiple bot scenarios.
 **Recent Changes**: Refactored `bot_monitor.py` to optimize API calls and improve log processing for accurate trade completion detection. Updated `simulate_trade_logs.py` to include multi-bot simulation.
 **Open Questions/Issues**: None. The core archiving and multi-bot handling is verified.
+[2025-08-20 20:32:29] - Debugged and validated `simulate_trade_logs.py` to ensure accurate simulation of bot monitoring, trade completion, and archiving logic. Confirmed that bots stopping with "Unknown Reason" are correctly kept in active monitoring as per production behavior.
