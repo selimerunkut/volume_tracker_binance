@@ -7,9 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, call
 # Add the parent directory to the sys.path to allow imports from the project root
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
-from bot_monitor import BotMonitor, TelegramNotifier
+from bot_monitor import BotMonitor
 from telegram_messenger import TelegramMessenger
-from trade_storage import TradeStorage # Import TradeStorage for mocking
+from trade_storage import TradeStorage
+from bot_status_handler import BotStatusHandler
+from log_processor import LogProcessor
+from telegram_notifier import TelegramNotifier
 
 async def simulate_bot_monitor_cycles():
     print("Starting Bot Monitor multi-cycle simulation...")
@@ -83,12 +86,22 @@ async def simulate_bot_monitor_cycles():
     trade_storage.remove_trade_entry = MagicMock()
 
     # Initialize BotMonitor with mocks
+    log_processor = LogProcessor(notifier=telegram_notifier)
+    bot_status_handler = BotStatusHandler(
+        notifier=telegram_notifier,
+        hummingbot_manager=mock_hummingbot_manager,
+        log_processor=log_processor,
+        time_provider=datetime.now
+    )
+
     bot_monitor = BotMonitor(
         hummingbot_manager=mock_hummingbot_manager,
         trade_storage=trade_storage,
         notifier=telegram_notifier,
+        bot_status_handler=bot_status_handler,
+        log_processor=log_processor,
         check_interval_seconds=1,
-        time_provider=datetime.now # Provide a callable time provider
+        time_provider=datetime.now
     )
 
     instance_name_bought = "buy_sell_trailing_stop_bot_SOL_USDC_fh66bcqz"
