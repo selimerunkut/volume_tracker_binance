@@ -12,6 +12,7 @@ dependencies = [
     "hummingbot-api-client",
     "aiohttp",
     "python-dotenv",
+    "telegramify_markdown",
 ]
 requires-python = ">=3.8"
 
