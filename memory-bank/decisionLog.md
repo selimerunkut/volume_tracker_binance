@@ -74,3 +74,11 @@ Implications:
 [2025-08-20 19:45:08] - **Decision**: Refactored `_process_active_trades` to reuse `all_bot_statuses_data` from `_synchronize_active_trades` instead of making a separate `get_bot_status` API call.
 **Rationale**: The `get_bot_status` endpoint was returning incomplete log data, leading to incorrect trade completion detection and bot archiving. Reusing the comprehensive data from `get_all_bot_statuses` ensures all necessary log information is available for accurate processing. This also reduces redundant API calls.
 **Implications**: Improved accuracy of bot lifecycle management (archiving), reduced API load, and simplified data flow within the `BotMonitor`.
+[2025-08-21 11:14:00] - **Decision:** Refactor `bot_monitor.py` into separate, single-responsibility modules: `bot_status_handler.py`, `log_processor.py`, and `telegram_notifier.py`.
+**Rationale:** To improve modularity, maintainability, testability, and adherence to S.O.L.I.D. principles. This decouples concerns related to bot status handling, log parsing, and Telegram notifications from the core monitoring loop.
+**Implementation Details:**
+- `bot_status_handler.py`: Encapsulates logic for handling running, stopped, and not-found bot statuses.
+- `log_processor.py`: Handles parsing of Hummingbot logs for PnL, open orders, trade events, and determining stop reasons.
+- `telegram_notifier.py`: Manages sending various types of notifications to Telegram.
+- `bot_monitor.py`: Updated to orchestrate these new modules, focusing solely on the monitoring loop and synchronization of active trades.
+- `simulate_trade_logs.py`: Modified to integrate and test the new modular structure.

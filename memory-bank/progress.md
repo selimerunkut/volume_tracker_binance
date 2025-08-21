@@ -17,6 +17,7 @@ This file tracks the project's progress using a task list format.
 *   Created all standard Memory Bank files.
 *   Enhanced bot status monitoring in `bot_monitor.py` with granular updates (active, stopped reasons, PnL/open orders from logs).
 *   Added `/status` Telegram command in `telegram_bot_handler.py` for bot status inquiry (single or all active bots) and updated `/help` message.
+*   [2025-08-21 11:13:00] - Refactored `bot_monitor.py` into modular components (`bot_status_handler.py`, `log_processor.py`, `telegram_notifier.py`) and verified functionality with `simulate_trade_logs.py`.
 
 ## Current Tasks
 
@@ -46,12 +47,12 @@ This file tracks the project's progress using a task list format.
         *   Call `HummingbotManager.create_and_deploy_bot()`.
     *   Modify `telegram_alerts.py` to include "buy" inline buttons with `trading_pair` data.
     *   Implement persistent storage for active bots (`active_trades.json`) with read/write functions.
-    *   Create `bot_monitor.py` with:
-        *   Periodic loop.
-        *   Logic to read `active_trades.json`.
-        *   Calls to `HummingbotManager.get_bot_status()` and `stop_and_archive_bot()`.
-        *   Logic to update `active_trades.json`.
-        *   Calls to `telegram_alerts.send_telegram_message` for notifications.
+    *   ~~Create `bot_monitor.py` with:~~
+        *   ~~Periodic loop.~~
+        *   ~~Logic to read `active_trades.json`.~~
+        *   ~~Calls to `HummingbotManager.get_bot_status()` and `stop_and_archive_bot()`.~~
+        *   ~~Logic to update `active_trades.json`.~~
+        *   ~~Calls to `telegram_alerts.send_telegram_message` for notifications.~~
 *   **Usability Improvements (Integrate into implementation):**
     *   Implement clear user feedback messages in Telegram (e.g., "Trade initiated!", "Bot stopped.").
     *   Implement input validation for user-provided parameters in Telegram conversation.

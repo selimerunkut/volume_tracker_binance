@@ -7,7 +7,7 @@ This file tracks the project's current status, including recent changes, current
 
 ## Current Focus
 
-*   Enhancing bot status monitoring and adding Telegram command for status inquiry.
+*   Monitoring and maintaining the stability of the Hummingbot monitoring service.
 
 ## Recent Changes
 
@@ -18,38 +18,19 @@ This file tracks the project's current status, including recent changes, current
 *   Transition from internal scheduling/cron to `systemd` service for robust execution.
 *   Updates to `README.md` and `setup_bot_server.sh` for `systemd` configuration.
 *   Creation of standard Memory Bank files (`productContext.md`, `activeContext.md`, `progress.md`, `decisionLog.md`, `systemPatterns.md`, `architecture_diagram.md`, `changelog.md` ).
+*   Implemented filtering for "bullish" volume in alerts.
+*   Completed implementation and testing of `hummingbot_integration.py`. The module provides an interface for managing Hummingbot instances, including creation, deployment, status checks, and stopping/archiving.
+*   Implemented granular bot status updates in `bot_monitor.py` (active, stopped reasons, PnL/open orders from logs).
+*   Added `/status` Telegram command in `telegram_bot_handler.py` for bot status inquiry (single or all active bots) and updated `/help` message.
+*   Resolved `NameError: name 're' is not defined` in `telegram_bot_handler.py` by adding `import re`.
+*   Confirmed that PnL and open order data are extracted from log messages using regex, as structured JSON fields are not currently available.
+*   Refactored `bot_monitor.py` into modular components (`bot_status_handler.py`, `log_processor.py`, `telegram_notifier.py`).
+*   Updated `simulate_trade_logs.py` to reflect the new module structure and ensure compatibility with refactored `BotMonitor`.
+*   Ensured `trade_storage.py` and `hummingbot_integration.py` are consistent with the refactoring.
+*   Verified functionality with `simulate_trade_logs.py`.
 
 ## Open Questions/Issues
 
 *   **Binance API Geographical Restriction**: The script encounters `BinanceAPIException: APIError(code=0): Service unavailable from a restricted location` when run from certain IP addresses (e.g., DigitalOcean **USA** servers). Solution is to run the script from europena IP addresses
 *   **Systemd Service Monitoring**: While `Restart=always` is configured, continuous monitoring of `journalctl` logs is needed to ensure the service is consistently restarting and running as expected, especially after initial setup.
-[2025-08-06 14:09:00] - Implemented filtering for "bullish" volume in alerts.
-[2025-08-18 19:15:23] - Completed implementation and testing of `hummingbot_integration.py`. The module provides an interface for managing Hummingbot instances, including creation, deployment, status checks, and stopping/archiving.
-[2025-08-19 10:26:30] - Implemented granular bot status updates in `bot_monitor.py` (active, stopped reasons, PnL/open orders from logs).
-[2025-08-19 10:26:30] - Added `/status` Telegram command in `telegram_bot_handler.py` for bot status inquiry (single or all active bots) and updated `/help` message.
-[2025-08-19 10:26:30] - Resolved `NameError: name 're' is not defined` in `telegram_bot_handler.py` by adding `import re`.
-[2025-08-19 10:26:30] - Confirmed that PnL and open order data are extracted from log messages using regex, as structured JSON fields are not currently available.
-[2025-08-19 13:27:28] - Debugging and Refining Bot Monitor and Tests
-
-**Current Focus:** Debugging and refining `bot_monitor.py` and `tests/test_bot_monitor.py`. Specifically, addressing `AssertionError`s related to `load_trades` being called twice and `stop_and_archive_bot`/`remove_trade_entry` not being asserted correctly in stopped/not-found bot scenarios.
-
-**Recent Changes:**
-*   Modified `bot_monitor.py`: `_synchronize_active_trades` now handles archiving and initial notifications for removed bots. `_handle_stopped_bot` and `_handle_not_found_bot` are simplified.
-*   Attempted modification of `tests/test_bot_monitor.py`: Updated `test_no_active_trades` to explicitly mock `load_trades` return value and assert `save_trades`. Intended to update other stopped/not-found bot tests to assert `stop_and_archive_bot` and `save_trades` with the modified list, and remove redundant mock side effects. (Note: The `apply_diff` for this file failed due to a syntax error, so these changes are not yet applied).
-
-**Open Questions/Issues:** Tests are still failing after the latest changes to `bot_monitor.py`. The core issue is still the assertion logic for stopped/not-found bots in `tests/test_bot_monitor.py`, which needs to be correctly applied.
-[2025-08-19 15:33:31] - Current focus is on resolving `tests/test_bot_monitor.py` failures, specifically `AssertionError: Expected 'save_trades' to be called once. Called 0 times.` and `KeyError: 'message'` in message assertions. The `TelegramNotifier.notify` signature was adjusted to make `message` optional. Debugging `apply_diff` formatting issues.
-[2025-08-19 15:36:08] - Comprehensive review of unstaged changes completed. Key changes include:
-- `bot_monitor.py`: Major refactoring into `BotMonitor` class with `TelegramNotifier` and `TradeStorage` dependencies. Centralized bot removal, archiving, and initial notification logic within `_synchronize_active_trades`.
-- `hummingbot_integration.py`: Added `get_all_bot_statuses` to retrieve all active bot statuses.
-- `trade_storage.py`: Refactored into a `TradeStorage` class with injected file operation functions for improved testability.
-- `telegram_messenger.py`: New file introduced to encapsulate Telegram messaging logic, including MarkdownV2 escaping.
-- `telegram_alerts.py`: Modified to use `TELEGRAM_BOT_TEST_MODE` environment variable for credential loading and to use `TelegramMessenger`.
-- `telegram_bot_handler.py`: Updated to use `TradeStorage` and `TelegramMessenger` instances.
-- `tests/test_bot_monitor.py`: Significant updates to mock `TelegramMessenger` and `TradeStorage`, and to adjust assertions for message content and `save_trades` calls.
-[2025-08-19 15:39:04] - Added new task: Enhance `bot_monitor.py` to send buy and sell messages in a parsable format, similar to bot status messages. This will likely involve extending `TelegramNotifier` and `TelegramMessenger` to handle new message types and extracting relevant information from Hummingbot logs or API responses.
-[2025-08-20 18:42:19] - Refactoring `bot_monitor.py` to address premature bot archiving and ensure consistent trade notifications. Focusing on `_synchronize_active_trades` to only add new bots, and moving removal/archiving logic to `_process_active_trades`.
-[2025-08-20 19:45:23] - **Current Focus**: Verified and fixed bot archiving logic, ensuring correct behavior for single and multiple bot scenarios.
-**Recent Changes**: Refactored `bot_monitor.py` to optimize API calls and improve log processing for accurate trade completion detection. Updated `simulate_trade_logs.py` to include multi-bot simulation.
-**Open Questions/Issues**: None. The core archiving and multi-bot handling is verified.
-[2025-08-20 20:32:29] - Debugged and validated `simulate_trade_logs.py` to ensure accurate simulation of bot monitoring, trade completion, and archiving logic. Confirmed that bots stopping with "Unknown Reason" are correctly kept in active monitoring as per production behavior.
+*   Enhance `bot_monitor.py` to send buy and sell messages in a parsable format, similar to bot status messages. This will likely involve extending `TelegramNotifier` and `TelegramMessenger` to handle new message types and extracting relevant information from Hummingbot logs or API responses.
