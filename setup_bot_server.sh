@@ -102,14 +102,34 @@ EOF'
     echo "Bot Monitor systemd service configured and started."
 }
 
+# Function to restart the Bot Monitor service
+restart_bot_monitor_service() {
+    echo "Restarting Bot Monitor service..."
+    sudo systemctl restart bot-monitor.service
+    echo "Bot Monitor service restarted."
+}
+
+# Function to restart all services
+restart_all_services() {
+    echo "Restarting all services..."
+    sudo systemctl restart binance-volume-tracker.service
+    sudo systemctl restart telegram-bot-handler.service
+    sudo systemctl restart bot-monitor.service
+    echo "All services restarted."
+}
+
 # Function to display usage instructions
 display_help() {
     echo "Usage: $0 [command]"
     echo "Commands:"
     echo "  all                         - Run the full setup script (default if no command is given)"
     echo "  configure_binance_service   - Configure and start Binance Volume Tracker systemd service"
+    echo "  restart_binance_service     - Restart Binance Volume Tracker systemd service"
     echo "  configure_telegram_service  - Configure and start Telegram Bot Handler systemd service"
+    echo "  restart_telegram_service    - Restart Telegram Bot Handler systemd service"
     echo "  configure_bot_monitor_service - Configure and start Bot Monitor systemd service"
+    echo "  restart_bot_monitor_service - Restart Bot Monitor systemd service"
+    echo "  restart_all_services        - Restart all configured services"
     echo "  help                        - Display this help message"
 }
 
@@ -202,11 +222,25 @@ else
         configure_binance_service)
             configure_binance_volume_tracker_service
             ;;
+        restart_binance_service)
+            sudo systemctl restart binance-volume-tracker.service
+            echo "Binance Volume Tracker service restarted."
+            ;;
         configure_telegram_service)
             configure_telegram_bot_handler_service
             ;;
+        restart_telegram_service)
+            sudo systemctl restart telegram-bot-handler.service
+            echo "Telegram Bot Handler service restarted."
+            ;;
         configure_bot_monitor_service)
             configure_bot_monitor_service
+            ;;
+        restart_bot_monitor_service)
+            restart_bot_monitor_service
+            ;;
+        restart_all_services)
+            restart_all_services
             ;;
         all)
             echo "Running full bot server setup..."
