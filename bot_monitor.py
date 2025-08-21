@@ -165,10 +165,25 @@ class BotMonitor:
                     stop_reason = await self._log_processor.determine_stop_reason(general_logs, error_logs)
                     if stop_reason == "Trade Completed":
                         print(f"DEBUG: Bot '{instance_name}' stopped due to 'Trade Completed'. Archiving and removing.")
-                        await self._hummingbot_manager.stop_and_archive_bot(instance_name)
-                        self._trade_storage.remove_trade_entry(instance_name)
-                        print(f"DEBUG: Calling handle_stopped_bot for {instance_name} (Trade Completed)")
-                        await self._bot_status_handler.handle_stopped_bot(trade, instance_name, status_response_data)
+                        archive_success, archive_response = await self._hummingbot_manager.stop_and_archive_bot(instance_name)
+                        if archive_success:
+                            self._trade_storage.remove_trade_entry(instance_name)
+                            
+                            # Retrieve PnL after trade completion (with delay for archiving)
+                            pnl_data = None  # Initialize pnl_data before retrieval
+                            print(f"DEBUG: Retrieving PnL for completed bot '{instance_name}'")
+                            pnl_success, pnl_data = await self._hummingbot_manager.get_bot_pnl_after_completion(instance_name)
+                            if pnl_success:
+                                print(f"DEBUG: PnL data retrieved for '{instance_name}': {pnl_data}")
+                            else:
+                                print(f"DEBUG: Failed to retrieve PnL for '{instance_name}': {pnl_data}")
+                            
+                            print(f"DEBUG: Calling handle_stopped_bot for {instance_name} (Trade Completed)")
+                            await self._bot_status_handler.handle_stopped_bot(trade, instance_name, status_response_data, pnl_data=pnl_data)
+                        else:
+                            print(f"DEBUG: Archiving failed for '{instance_name}': {archive_response}")
+                            # If archiving fails, we still want to keep monitoring the bot
+                            trades_to_keep.append(trade)
                     else:
                         print(f"DEBUG: Bot '{instance_name}' stopped for reason: '{stop_reason}'. Keeping in active trades for monitoring.")
                         print(f"DEBUG: Calling handle_stopped_bot for {instance_name} (Not Trade Completed)")
@@ -179,19 +194,39 @@ class BotMonitor:
                     stop_reason = await self._log_processor.determine_stop_reason(general_logs, error_logs)
                     if stop_reason == "Trade Completed":
                         print(f"DEBUG: Bot '{instance_name}' completed successfully with trades. Archiving and removing.")
-                        await self._hummingbot_manager.stop_and_archive_bot(instance_name)
-                        self._trade_storage.remove_trade_entry(instance_name)
-                        print(f"DEBUG: Calling handle_stopped_bot for {instance_name} (Success with Trade Completed)")
-                        await self._bot_status_handler.handle_stopped_bot(trade, instance_name, status_response_data)
+                        archive_success, archive_response = await self._hummingbot_manager.stop_and_archive_bot(instance_name)
+                        if archive_success:
+                            self._trade_storage.remove_trade_entry(instance_name)
+                            
+                            # Retrieve PnL after trade completion (with delay for archiving)
+                            pnl_data = None  # Initialize pnl_data before retrieval
+                            print(f"DEBUG: Retrieving PnL for completed bot '{instance_name}'")
+                            pnl_success, pnl_data = await self._hummingbot_manager.get_bot_pnl_after_completion(instance_name)
+                            if pnl_success:
+                                print(f"DEBUG: PnL data retrieved for '{instance_name}': {pnl_data}")
+                            else:
+                                print(f"DEBUG: Failed to retrieve PnL for '{instance_name}': {pnl_data}")
+                            
+                            print(f"DEBUG: Calling handle_stopped_bot for {instance_name} (Success with Trade Completed)")
+                            await self._bot_status_handler.handle_stopped_bot(trade, instance_name, status_response_data, pnl_data=pnl_data)
+                        else:
+                            print(f"DEBUG: Archiving failed for '{instance_name}': {archive_response}")
+                            # If archiving fails, we still want to keep monitoring the bot
+                            trades_to_keep.append(trade)
                     else:
                         print(f"DEBUG: Bot '{instance_name}' has 'success' status but no 'Trade Completed' log. Keeping for now.")
                         trades_to_keep.append(trade)
                 elif bot_actual_status == "not_found":
                     print(f"DEBUG: Bot '{instance_name}' not found. Archiving and removing.")
-                    await self._hummingbot_manager.stop_and_archive_bot(instance_name)
-                    self._trade_storage.remove_trade_entry(instance_name)
-                    print(f"DEBUG: Calling handle_not_found_bot for {instance_name}")
-                    await self._bot_status_handler.handle_not_found_bot(trade, instance_name)
+                    archive_success, archive_response = await self._hummingbot_manager.stop_and_archive_bot(instance_name)
+                    if archive_success:
+                        self._trade_storage.remove_trade_entry(instance_name)
+                        print(f"DEBUG: Calling handle_not_found_bot for {instance_name}")
+                        await self._bot_status_handler.handle_not_found_bot(trade, instance_name)
+                    else:
+                        print(f"DEBUG: Archiving failed for '{instance_name}': {archive_response}")
+                        # If archiving fails, we still want to keep monitoring the bot
+                        trades_to_keep.append(trade)
                 else:
                     print(f"DEBUG: Unknown bot status for '{instance_name}': {bot_actual_status}. Keeping in active trades.")
                     trades_to_keep.append(trade)

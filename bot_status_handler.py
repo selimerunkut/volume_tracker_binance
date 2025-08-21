@@ -19,7 +19,7 @@ class BotStatusHandler:
         self._last_active_message_time: Dict[str, datetime] = {}
 
 
-    async def handle_stopped_bot(self, trade: Dict[str, Any], instance_name: str, status_response: Dict[str, Any]):
+    async def handle_stopped_bot(self, trade: Dict[str, Any], instance_name: str, status_response: Dict[str, Any], pnl_data: Optional[Dict[str, Any]] = None):
         print(f"DEBUG: Entering handle_stopped_bot for {instance_name}")
         """Handles a stopped bot and sends a notification. Archiving is handled by _synchronize_active_trades."""
         chat_id = trade.get('chat_id')
@@ -36,7 +36,8 @@ class BotStatusHandler:
             instance_name=instance_name,
             trading_pair=trading_pair,
             status="stopped",
-            stop_reason=stop_reason
+            stop_reason=stop_reason,
+            pnl_info=pnl_data if pnl_data else None
         )
         self._last_active_message_time.pop(instance_name, None)
 

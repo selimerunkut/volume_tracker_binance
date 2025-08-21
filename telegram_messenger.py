@@ -105,20 +105,46 @@ class TelegramMessenger:
         )
         return await self._send_message(chat_id, message, dry_run=dry_run)
 
-    async def send_bot_status_update(self, chat_id: str, instance_name: str, trading_pair: str, status: str, pnl_info: str = "PnL: N/A", open_orders_info: str = "Open Orders: N/A", stop_reason: Optional[str] = None, dry_run: bool = False):
+    async def send_bot_status_update(self, chat_id: str, instance_name: str, trading_pair: str, status: str, pnl_info: Optional[Dict[str, Any]] = None, open_orders_info: str = "Open Orders: N/A", stop_reason: Optional[str] = None, dry_run: bool = False):
         """Sends a status update for a bot."""
         status_emoji = "🟢" if status == "running" else "🔔"
         message = (
             f"{status_emoji} Bot Status Update {status_emoji}\n"
             f"Bot: `{instance_name}`\n"
             f"Pair: `{trading_pair}`\n"
-            f"{pnl_info}\n"
+            f"{self._format_pnl_info(pnl_info)}\n"
             f"{open_orders_info}\n"
             f"Status: {status}."
         )
         if stop_reason:
             message += f" ({stop_reason})"
         return await self._send_message(chat_id, message, dry_run=dry_run)
+
+    def _format_pnl_info(self, pnl_data: Optional[Dict[str, Any]]) -> str:
+        if not pnl_data:
+            return "PnL: N/A"
+
+        # Extract relevant PnL metrics and format them
+        summary_data = pnl_data.get('performance', {}).get('summary', {})
+
+        total_pnl = summary_data.get('final_net_pnl_quote', 'N/A') # Using final_net_pnl_quote as total PnL
+        total_pnl_quote = summary_data.get('final_net_pnl_quote', 'N/A') # Using final_net_pnl_quote as total PnL (Quote)
+        total_volume_quote = summary_data.get('total_volume_quote', 'N/A')
+        total_fees_quote = summary_data.get('total_fees_quote', 'N/A')
+        # Daily PnL metrics are not directly available in the summary, so we'll keep them as N/A or derive if possible
+        pnl_daily_usd = 'N/A'
+        pnl_daily_percent = 'N/A'
+
+        formatted_pnl = (
+            f"📊 *PnL Summary* 📊\n"
+            f"  Total PnL: `{total_pnl}`\n"
+            f"  Total PnL (Quote): `{total_pnl_quote}`\n"
+            f"  Total Volume (Quote): `{total_volume_quote}`\n"
+            f"  Total Fees (Quote): `{total_fees_quote}`\n"
+            f"  Daily PnL (USD): `{pnl_daily_usd}`\n"
+            f"  Daily PnL (%): `{pnl_daily_percent}`"
+        )
+        return formatted_pnl
 
     async def send_bot_not_found_alert(self, chat_id: str, instance_name: str, trading_pair: str, dry_run: bool = False):
         """Sends an alert when a bot is not found."""

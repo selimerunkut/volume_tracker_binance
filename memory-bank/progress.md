@@ -86,3 +86,12 @@ This file tracks the project's progress using a task list format.
 [2025-08-20 18:08:00] - Completed debugging and fixing test failures in `tests/test_bot_monitor.py`. Resolved timestamp type mismatch and assertion issues.
 [2025-08-20 19:44:54] - Completed fix for premature bot archiving and verified multi-bot handling.
 [2025-08-20 20:32:38] - Completed debugging and validation of `simulate_trade_logs.py`. The simulation now accurately reflects the `BotMonitor`'s behavior, including the handling of "stopped" bots with "Unknown Reason" (keeping them in active monitoring).
+[2025-08-21 18:37:00] - **Completed Implementation and Debugging of PnL Retrieval and Telegram Notification:**
+  - Successfully implemented PnL retrieval from archived Hummingbot instances.
+  - Integrated PnL data into Telegram bot status updates.
+  - **Key Solutions Implemented:**
+    - **Robust Database Discovery:** Implemented a retry mechanism in `hummingbot_integration.py` (`get_bot_pnl_after_completion`) to poll `list_databases` until the correct archived bot's database is found, addressing timing issues and ensuring the full database path is used for `get_database_performance`.
+    - **Accurate PnL Data Extraction:** Corrected `telegram_messenger.py` (`_format_pnl_info`) to properly extract nested PnL metrics from the `performance.summary` dictionary.
+    - **Graceful Error Handling:** Enhanced error handling in `hummingbot_integration.py` for `ClientResponseError` and `sqlite3.OperationalError` (specifically "no such table: TradeFill"), providing more informative error messages.
+    - **Simulation Refinement:** Updated `simulate_trade_logs.py` to use the real `HummingbotManager` for PnL and archiving calls (when API credentials are provided), allowing for end-to-end testing with a live Hummingbot instance. Also adjusted simulation data and assertions for accuracy.
+  - **Verification:** Confirmed successful PnL data retrieval and correct population of Telegram bot status update messages.

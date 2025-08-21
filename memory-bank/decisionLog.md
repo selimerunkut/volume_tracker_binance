@@ -82,3 +82,23 @@ Implications:
 - `telegram_notifier.py`: Manages sending various types of notifications to Telegram.
 - `bot_monitor.py`: Updated to orchestrate these new modules, focusing solely on the monitoring loop and synchronization of active trades.
 - `simulate_trade_logs.py`: Modified to integrate and test the new modular structure.
+[2025-08-21 18:36:00] - **Decision:** Implemented robust PnL retrieval and Telegram notification, addressing database availability and data parsing.
+**Rationale:** Initial PnL retrieval attempts failed due to timing issues with Hummingbot's archiving process and incorrect database pathing. Telegram messages were not populated due to incorrect data extraction from the PnL response. Robust error handling and a retry mechanism were necessary for reliable operation.
+**Implementation Details:**
+- **`hummingbot_integration.py`**:
+   - `get_bot_pnl_after_completion`:
+       - Increased `initial_wait_seconds` to 60s.
+       - Implemented a retry mechanism (5 retries, 10s interval) to poll `list_databases` until the archived bot's database is found.
+       - Corrected database path extraction: now passes the *full path* (e.g., `bots/archived/.../config_*.sqlite`) to `get_database_performance`, instead of just the filename.
+       - Enhanced `ClientResponseError` handling to correctly extract and propagate error details.
+   - `get_database_performance`:
+       - Added specific error handling for `sqlite3.OperationalError: no such table: TradeFill`, returning a more informative error message.
+- **`telegram_messenger.py`**:
+   - `_format_pnl_info`: Modified to correctly access nested PnL metrics from `pnl_data['performance']['summary']` (e.g., `final_net_pnl_quote`, `total_volume_quote`, `total_fees_quote`).
+- **`bot_monitor.py`**:
+   - Ensured `pnl_data` is always initialized and passed to `handle_stopped_bot`.
+   - Corrected logic for conditional archiving and PnL retrieval order.
+- **`simulate_trade_logs.py`**:
+   - Updated to use the real `HummingbotManager` for PnL and archiving calls when API credentials are provided, allowing for end-to-end testing with a live Hummingbot instance.
+   - Corrected `instance_name_completed` to use an existing archived bot for more realistic testing.
+   - Fixed assertion logic by resetting mocks between simulation cycles.

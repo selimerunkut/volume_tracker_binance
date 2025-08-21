@@ -253,6 +253,126 @@ class HummingbotManager:
             print(f"An unexpected error occurred: {e}")
             return False, {"error": f"Unexpected error: {e}"}
 
+    async def list_databases(self):
+        """
+        Lists all available databases from the Hummingbot API.
+        """
+        print("\n--- Listing Databases ---")
+        try:
+            response = await self.client.archived_bots.list_databases()
+            print(f"Available databases: {json.dumps(response, indent=2)}")
+            return True, response
+        except ClientResponseError as e:
+            print(f"API error occurred while listing databases: {e.status} - {e.message}")
+            print(f"Response content: {await e.text()}")
+            return False, {"error": f"API error: {e.status} - {e.message}"}
+        except Exception as e:
+            print(f"An unexpected error occurred while listing databases: {e}")
+            return False, {"error": f"Unexpected error: {e}"}
+
+    async def get_database_performance(self, db_path: str):
+        """
+        Retrieves performance data (PnL) for a specific database.
+        
+        Args:
+            db_path: Full path to the database file (e.g., "config_randomstring.sqlite")
+        """
+        print(f"\n--- Getting Database Performance for: {db_path} ---")
+        try:
+            response = await self.client.archived_bots.get_database_performance(db_path=db_path)
+            print(f"Performance data for '{db_path}': {json.dumps(response, indent=2)}")
+            return True, response
+        except ClientResponseError as e:
+            print(f"API error occurred while getting database performance: {e.status} - {e.message}")
+            print(f"Response content: {await e.text()}")
+            return False, {"error": f"API error: {e.status} - {e.message}"}
+        except ClientResponseError as e:
+            error_message = await e.text()
+            print(f"API error occurred while getting database performance: {e.status} - {e.message}")
+            print(f"Response content: {error_message}")
+            if "no such table: TradeFill" in error_message:
+                return False, {"error": "Database performance error: No 'TradeFill' table found in database.", "details": error_message}
+            return False, {"error": f"API error: {e.status} - {e.message}", "details": error_message}
+        except Exception as e:
+            print(f"An unexpected error occurred while getting database performance: {e}")
+            return False, {"error": f"Unexpected error: {e}"}
+
+    async def get_bot_pnl_after_completion(self, instance_name: str, initial_wait_seconds: int = 30, max_retries: int = 5, retry_interval_seconds: int = 10):
+        """
+        Retrieves PnL for a bot after trade completion, with a delay and retry mechanism to allow for archiving.
+        
+        The database name is found by matching the instance_name within the full database path returned by list_databases.
+        
+        Args:
+            instance_name: Name of the bot instance
+            initial_wait_seconds: Initial seconds to wait before first attempt (default 60)
+            max_retries: Maximum number of retries to find the database (default 5)
+            retry_interval_seconds: Seconds to wait between retries (default 10)
+        """
+        print(f"\n--- Getting PnL for completed bot: {instance_name} (initial wait {initial_wait_seconds}s) ---")
+        
+        await asyncio.sleep(initial_wait_seconds) # Initial wait for archiving to start
+        
+        target_database = None
+        for attempt in range(max_retries):
+            print(f"Attempt {attempt + 1}/{max_retries}: Listing databases to find '{instance_name}'...")
+            success, databases = await self.list_databases()
+            
+            if not success:
+                print(f"Warning: Failed to list databases on attempt {attempt + 1}: {databases}. Retrying...")
+                await asyncio.sleep(retry_interval_seconds)
+                continue
+            
+            database_list = []
+            if isinstance(databases, dict) and "databases" in databases:
+                database_list = databases["databases"]
+            elif isinstance(databases, list):
+                database_list = databases
+            
+            for db_entry in database_list:
+                db_name_full = db_entry if isinstance(db_entry, str) else db_entry.get("name", "")
+                # Check if the instance name is part of the path and it's a config sqlite file
+                if f"bots/archived/{instance_name}/data/config_" in db_name_full and db_name_full.endswith(".sqlite"):
+                    target_database = db_name_full # Use the full path
+                    print(f"Found database '{target_database}' for bot '{instance_name}' on attempt {attempt + 1}.")
+                    break
+            
+            if target_database:
+                break # Database found, exit retry loop
+            else:
+                print(f"Database for bot '{instance_name}' not found in archived list on attempt {attempt + 1}. Retrying in {retry_interval_seconds}s...")
+                await asyncio.sleep(retry_interval_seconds)
+        
+        if not target_database:
+            return False, {"error": f"Database for bot '{instance_name}' not found after {max_retries} attempts. PnL data unavailable."}
+        
+        print(f"Using database: '{target_database}' for PnL retrieval.")
+        
+        try:
+            success, performance = await self.get_database_performance(target_database)
+            if not success:
+                if isinstance(performance, dict) and performance.get("error") == "Database performance error: No 'TradeFill' table found in database.":
+                    return False, {"error": "PnL data not available: No trade fills found for this bot.", "details": performance.get("details", "")}
+                return False, {"error": "Failed to get performance data", "details": performance}
+            
+            return True, {
+                "instance_name": instance_name,
+                "database": target_database,
+                "performance": performance
+            }
+            
+        except ClientResponseError as e:
+            print(f"API error occurred while getting bot PnL: {e.status} - {e.message}")
+            try:
+                error_details = await e.text()
+                print(f"Response content: {error_details}")
+                return False, {"error": f"API error: {e.status} - {e.message}. Details: {error_details}"}
+            except Exception:
+                return False, {"error": f"API error: {e.status} - {e.message}. No response content available."}
+        except Exception as e:
+            print(f"An unexpected error occurred while getting bot PnL: {e}")
+            return False, {"error": f"Unexpected error: {e}"}
+
 # Example Usage (for testing purposes, can be removed later)
 # Main execution block
 async def main():

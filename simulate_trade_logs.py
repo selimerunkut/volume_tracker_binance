@@ -2,12 +2,14 @@ import asyncio
 import sys
 import os
 from datetime import datetime # Correct import for datetime.now()
+from dotenv import load_dotenv
 from unittest.mock import AsyncMock, MagicMock, call
 
 # Add the parent directory to the sys.path to allow imports from the project root
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
 from bot_monitor import BotMonitor
+from hummingbot_integration import HummingbotManager
 from telegram_messenger import TelegramMessenger
 from trade_storage import TradeStorage
 from bot_status_handler import BotStatusHandler
@@ -25,11 +27,42 @@ async def simulate_bot_monitor_cycles():
 
     telegram_notifier = TelegramNotifier(mock_telegram_messenger)
 
-    # Mock HummingbotManager
-    mock_hummingbot_manager = AsyncMock()
-    mock_hummingbot_manager.stop_and_archive_bot = AsyncMock()
-    
-    # Mock get_bot_status to return full details for new bots
+    # Initialize HummingbotManager (not mocked for PnL retrieval)
+    # NOTE: For this simulation to work correctly for PnL retrieval,
+    # a Hummingbot instance with its API server must be running,
+    # and HUMMINGBOT_API_URL, USERNAME, and PASSWORD environment variables
+    # must be set in your .env file.
+    load_dotenv()
+    api_base_url = os.getenv("HUMMINGBOT_API_URL", "http://localhost:8000")
+    api_username = os.getenv("USERNAME")
+    api_password = os.getenv("PASSWORD")
+
+    if not all([api_base_url, api_username, api_password]):
+        print("ERROR: Please set HUMMINGBOT_API_URL, USERNAME, and PASSWORD environment variables in your .env file for PnL simulation.")
+        print("Skipping PnL retrieval simulation due to missing credentials.")
+        # Create a mocked manager if credentials are not set, to allow other parts of the simulation to run
+        # Always create a mock for the manager that will be passed to BotMonitor
+        mock_hummingbot_manager = AsyncMock(spec=HummingbotManager)
+        mock_hummingbot_manager.stop_and_archive_bot = AsyncMock(return_value=(True, {"message": "Bot archived successfully (simulated)"}))
+        mock_hummingbot_manager.get_bot_pnl_after_completion = AsyncMock(return_value=(True, {
+            "total_pnl": 0.001,
+            "total_pnl_quote": 0.001,
+            "total_volume_quote": 100.0,
+            "total_fees_quote": 0.0001,
+            "pnl_daily_usd": 0.0005,
+            "pnl_daily_percent": 0.00001
+        }))
+    else:
+        # Create a real HummingbotManager instance for actual API calls
+        hummingbot_manager_to_use = HummingbotManager(api_base_url, api_username, api_password)
+        await hummingbot_manager_to_use.initialize_client()
+        
+        # We will use the real manager, but still mock get_all_bot_statuses and get_bot_status
+        # to control the simulation's bot status responses.
+        mock_hummingbot_manager = AsyncMock(wraps=hummingbot_manager_to_use)
+        mock_hummingbot_manager._real_manager = hummingbot_manager_to_use # Store for cleanup
+
+    # Mock get_bot_status to return full details for new bots (this part can still be mocked for consistent simulation behavior)
     mock_hummingbot_manager.get_bot_status = AsyncMock(side_effect=[
         # First call for SOL bot (newly detected)
         (True, {
@@ -106,7 +139,7 @@ async def simulate_bot_monitor_cycles():
 
     instance_name_bought = "buy_sell_trailing_stop_bot_SOL_USDC_fh66bcqz"
     instance_name_no_buy = "buy_sell_trailing_stop_bot_BTC_USDC_ucha4sat"
-    instance_name_completed = "buy_sell_trailing_stop_bot_XRP_USDC_completed"
+    instance_name_completed = "buy_sell_trailing_stop_bot_SOL_USDC_dfkkwzqe"
     instance_name_missing = "buy_sell_trailing_stop_bot_ETH_USDC_missing"
     chat_id = "12345"
 
@@ -175,16 +208,26 @@ async def simulate_bot_monitor_cycles():
         call(instance_name_completed) # XRP bot status 'success' with "All positions closed."
     ], any_order=True)
     
+    # Verify PnL retrieval is called for completed trades
+    assert mock_hummingbot_manager.get_bot_pnl_after_completion.call_count == 2
+    mock_hummingbot_manager.get_bot_pnl_after_completion.assert_has_calls([
+        call(instance_name_bought),
+        call(instance_name_completed)
+    ], any_order=True)
+    
     assert trade_storage.remove_trade_entry.call_count == 2
     trade_storage.remove_trade_entry.assert_has_calls([
         call(instance_name_bought),
         call(instance_name_completed)
     ], any_order=True)
     
-    # Reset mocks
+    # Reset mocks (only for the ones that are still mocked)
     trade_storage.reset_mock()
-    mock_hummingbot_manager.reset_mock()
     mock_telegram_messenger.reset_mock()
+    
+    # If a real HummingbotManager was used, close its client
+    if hasattr(mock_hummingbot_manager, '_real_manager'):
+        await mock_hummingbot_manager._real_manager.close_client()
 
     # --- Cycle 3: Verify no re-adding of archived bot ---
     print("\n--- Cycle 3: Verify no re-adding of archived bot ---")
@@ -197,6 +240,11 @@ async def simulate_bot_monitor_cycles():
         }
     }
     trade_storage.load_trades.return_value = final_trades_c2
+    
+    # Reset mocks for Cycle 3
+    mock_hummingbot_manager.stop_and_archive_bot.reset_mock()
+    trade_storage.remove_trade_entry.reset_mock()
+    
     await run_single_cycle()
 
     # Assertions for Cycle 3

@@ -61,3 +61,19 @@
 -   Created `memory-bank` directory and `changelog.md`.
 
 [2025-08-20 19:45:15] - **Fix**: Resolved premature bot archiving and ensured correct archiving upon trade completion. Refactored `BotMonitor` to reuse comprehensive bot status data from `get_all_bot_statuses` to ensure accurate log processing and trade completion detection. Verified multi-bot handling.
+
+## 2025-08-21
+
+-   **Feature:** Implemented robust PnL retrieval and Telegram notification for completed Hummingbot trades.
+    -   **`hummingbot_integration.py`**:
+        -   Added retry mechanism for database discovery in `get_bot_pnl_after_completion` to handle archiving delays.
+        -   Ensured full database path is used for PnL retrieval.
+        -   Improved error handling for API responses, including specific handling for missing `TradeFill` table.
+    -   **`telegram_messenger.py`**:
+        -   Corrected PnL data extraction from nested API responses for Telegram messages.
+    -   **`bot_monitor.py`**:
+        -   Ensured `pnl_data` is always initialized and passed to status handlers.
+        -   Refined conditional archiving logic.
+    -   **`simulate_trade_logs.py`**:
+        -   Configured to use real Hummingbot API for PnL and archiving calls when credentials are provided.
+        -   Updated simulation data and assertions for accurate testing of PnL flow.
