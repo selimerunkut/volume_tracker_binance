@@ -1,10 +1,22 @@
 {
     "excluded_symbols": [
+        "DNTBTC",
+        "TVKBTC",
+        "BTCBBTC",
         "FXSBTC",
-        "SNTBTC",
-        "FIROBTC",
-        "MATICBTC",
         "BATUSDC",
+        "NCASHBTC",
+        "MATICBTC",
+        "IOSTBTC",
+        "CLVBTC",
+        "FIROBTC",
+        "MTHBTC",
+        "LITBTC",
+        "XZCBTC",
+        "TOMOBTC",
+        "HOOKBTC",
+        "SNTBTC",
+        "BCHSVBTC",
         "NUBTC"
     ]
 }
