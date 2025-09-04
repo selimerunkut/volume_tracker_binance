@@ -12,9 +12,12 @@ from telegram_alerts import send_telegram_message  # Import the Telegram alert f
 # File to store the state of sent alerts
 STATE_FILE = 'alert_state.json'
 COOLDOWN_PERIOD_HOURS = 1 # Cooldown period in hours to prevent duplicate alerts
+CLEANUP_PERIOD_DAYS = 1 # Days after which to remove old alert entries
 
 def load_alert_state():
-    """Loads the last_alert_timestamps from a JSON file."""
+    """
+    Loads the last_alert_timestamps from a JSON file and cleans up old entries.
+    """
     try:
         with open(STATE_FILE, 'r') as f:
             state = json.load(f)
@@ -27,7 +30,24 @@ def load_alert_state():
                     'volume': float(alert_data['volume'])
                 }
             print(f"[{datetime.datetime.now()}] Loaded alert state from {STATE_FILE}.")
-            return loaded_timestamps
+
+            # Clean up old entries
+            now = datetime.datetime.now()
+            cutoff = now - datetime.timedelta(days=CLEANUP_PERIOD_DAYS)
+            cleaned_timestamps = {}
+            removed_count = 0
+            for key, alert_data in loaded_timestamps.items():
+                if alert_data['timestamp'] > cutoff:
+                    cleaned_timestamps[key] = alert_data
+                else:
+                    removed_count += 1
+            
+            if removed_count > 0:
+                print(f"[{datetime.datetime.now()}] Cleaned up {removed_count} old alert(s) older than {CLEANUP_PERIOD_DAYS} days.")
+                # Save the cleaned state back to the file immediately
+                save_alert_state(cleaned_timestamps)
+
+            return cleaned_timestamps
     except FileNotFoundError:
         print(f"[{datetime.datetime.now()}] Alert state file not found. Starting with empty state.")
         return {}
