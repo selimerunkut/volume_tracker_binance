@@ -3,6 +3,9 @@
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
+INSTALL_DIR="/opt/volume_tracker_binance"
+SERVICE_USER="root"
+
 # Default: run all steps
 RUN_SYSTEM_UPDATE=false
 RUN_UV_INSTALL=false
@@ -21,7 +24,7 @@ show_usage() {
     echo "  --system-update        Update and upgrade the system"
     echo "  --uv-install           Install uv Python package manager"
     echo "  --python-deps          Install Python dependencies"
-    echo "  --systemd-services     Configure systemd services (volume tracker + telegram bot)"
+    echo "  --systemd-services     Configure systemd services (AI strategy bot + volume tracker)"
     echo "  --extra-tools          Install extra tools (byobu, zsh, oh-my-zsh)"
     echo "  --swap                 Configure swap space"
     echo "  --disable-services     Disable unnecessary services"
@@ -31,6 +34,12 @@ show_usage() {
     echo "  $0 --all                                    # Run everything"
     echo "  $0 --systemd-services                       # Configure systemd services only"
     echo "  $0 --python-deps --systemd-services         # Install deps and configure services"
+    echo ""
+    echo "Services created:"
+    echo "  - binance-strategy-bot.service (AI Strategy Advisor + Telegram Bot)"
+    echo "  - binance-volume-tracker.service (Volume alerts only - legacy)"
+    echo ""
+    echo "Installation directory: $INSTALL_DIR"
 }
 
 # Parse command line arguments
@@ -121,9 +130,18 @@ if [ "$RUN_UV_INSTALL" = true ]; then
     echo ""
 fi
 
-# 3. Install Python dependencies using uv
 if [ "$RUN_PYTHON_DEPS" = true ]; then
     echo "=== Installing Python dependencies with uv ==="
+    
+    if [ ! -d "$INSTALL_DIR" ]; then
+        echo "Creating installation directory: $INSTALL_DIR"
+        sudo mkdir -p "$INSTALL_DIR"
+        sudo chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+    fi
+    
+    cd "$INSTALL_DIR"
+    echo "Working in: $(pwd)"
+    
     uv venv
     source .venv/bin/activate
     echo "Virtual environment activated."
@@ -134,70 +152,73 @@ if [ "$RUN_PYTHON_DEPS" = true ]; then
     echo ""
 fi
 
-# 7. Configure systemd service for the Binance Volume Tracker
 if [ "$RUN_SYSTEMD_SERVICES" = true ]; then
     echo "=== Configuring systemd services ==="
     
-    # Configure volume tracker service
-    echo "Creating binance-volume-tracker.service..."
-    sudo bash -c 'cat <<EOF > /etc/systemd/system/binance-volume-tracker.service
+    echo "Creating binance-strategy-bot.service..."
+    sudo tee /etc/systemd/system/binance-strategy-bot.service > /dev/null <<EOF
 [Unit]
-Description=Binance Volume Tracker Script
+Description=Binance AI Strategy Advisor Bot
 After=network.target
 
 [Service]
-User=root
-WorkingDirectory=/root/volume_tracker_binance
-ExecStart=/root/volume_tracker_binance/.venv/bin/python /root/volume_tracker_binance/b_volume_alerts.py
-Restart=always # This ensures the script restarts all the time after it finishes its run, it a continuous execution
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF'
-
-    # Reload systemd to recognize the new service file
-    echo "Reloading systemd daemon..."
-    sudo systemctl daemon-reload
-
-    # Enable and start the new service
-    echo "Enabling and starting binance-volume-tracker.service..."
-    sudo systemctl enable binance-volume-tracker.service
-    sudo systemctl start binance-volume-tracker.service
-
-    echo "Binance Volume Tracker systemd service configured and started."
-    echo ""
-
-    # 8. Configure systemd service for the Telegram Bot Handler
-    echo "Creating telegram-bot-handler.service..."
-    sudo bash -c 'cat <<EOF > /etc/systemd/system/telegram-bot-handler.service
-[Unit]
-Description=Telegram Bot Handler Script
-After=network.target
-
-[Service]
-User=root
-WorkingDirectory=/root/volume_tracker_binance
-ExecStart=/root/volume_tracker_binance/.venv/bin/python /root/volume_tracker_binance/telegram_bot_handler.py
+Type=simple
+User=$SERVICE_USER
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$INSTALL_DIR/.venv/bin/python $INSTALL_DIR/telegram_bot_handler.py
 Restart=always
+RestartSec=10
 StandardOutput=journal
 StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-EOF'
+EOF
 
-    # Reload systemd to recognize the new service file
+    echo "Creating binance-volume-tracker.service..."
+    sudo tee /etc/systemd/system/binance-volume-tracker.service > /dev/null <<EOF
+[Unit]
+Description=Binance Volume Tracker
+After=network.target
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$INSTALL_DIR/.venv/bin/python $INSTALL_DIR/b_volume_alerts.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
     echo "Reloading systemd daemon..."
     sudo systemctl daemon-reload
 
-    # Enable and start the new service
-    echo "Enabling and starting telegram-bot-handler.service..."
-    sudo systemctl enable telegram-bot-handler.service
-    sudo systemctl start telegram-bot-handler.service
+    echo "Enabling and starting binance-strategy-bot.service..."
+    sudo systemctl enable binance-strategy-bot.service
+    sudo systemctl start binance-strategy-bot.service
 
-    echo "Telegram Bot Handler systemd service configured and started."
+    echo ""
+    echo "========================================"
+    echo "Services configured successfully!"
+    echo "========================================"
+    echo ""
+    echo "AI Strategy Bot (RECOMMENDED):"
+    echo "  Status: sudo systemctl status binance-strategy-bot.service"
+    echo "  Logs:   sudo journalctl -u binance-strategy-bot.service -f"
+    echo ""
+    echo "Volume Tracker (Legacy - optional):"
+    echo "  Start:  sudo systemctl start binance-volume-tracker.service"
+    echo "  Status: sudo systemctl status binance-volume-tracker.service"
+    echo "  Logs:   sudo journalctl -u binance-volume-tracker.service -f"
+    echo ""
+    echo "To run both services:"
+    echo "  sudo systemctl start binance-strategy-bot.service"
+    echo "  sudo systemctl start binance-volume-tracker.service"
     echo ""
 fi
 
