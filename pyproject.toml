@@ -7,9 +7,12 @@ dependencies = [
     "pandas",
     "python-binance",
     "numpy", # Added numpy as it's often a dependency for pandas operations, and the user mentioned np.float64
-    "python-telegram-bot",
+    "python-telegram-bot[job-queue]",
+    "feedparser",
+    "pandas-ta",
+    "openai",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.12"
 
 [build-system]
 requires = ["setuptools>=61.0"]
