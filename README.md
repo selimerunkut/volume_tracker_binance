@@ -1,9 +1,10 @@
-# Binance Volume Tracker
+# Binance Volume Tracker & AI Strategy Advisor
 
-This project tracks cryptocurrency volume on Binance and sends alerts based on predefined volume levels.
+This project tracks cryptocurrency volume on Binance and sends alerts based on predefined volume levels. It also includes an **AI-powered Strategy Advisor** that analyzes market data, technical indicators, and news to suggest trading strategies with a self-improving learning loop.
 
 ## Features
 
+### Volume Tracker
 - Fetches real-time volume data for USDC pairs on Binance.
 - Calculates current volume against historical mean volume.
 - Generates alerts for significant volume changes.
@@ -13,10 +14,21 @@ This project tracks cryptocurrency volume on Binance and sends alerts based on p
     - Alert level
     - Links to TradingView chart
     - Links to Binance trade page
-- Allows dynamic management of restricted trading pairs via Telegram bot:
-    - Restrict a pair directly from an alert message using an inline button.
-    - List all currently restricted pairs using a bot command.
-    - Unrestrict a specific pair using a bot command.
+
+### AI Strategy Advisor (New)
+- **Smart Analysis**: Uses LLM (via OpenRouter) to analyze technical indicators (RSI, MACD, Bollinger Bands, EMA) and crypto news.
+- **Memory & Learning**: Tracks all suggestions and evaluates outcomes to learn from past performance.
+- **WAIT Strategy Support**: Even "WAIT" recommendations are tracked and scored based on price movement.
+- **Detailed Context**: View full analysis details including technical indicators, news sources, and past performance influence.
+
+### Telegram Bot Commands
+- `/analyze <SYMBOL>` - Get AI-generated trading strategy with Entry, TP, SL, and confidence score.
+- `/history` - View performance statistics (wins, losses, win rate, average PnL).
+- `/list_restricted` - List all restricted trading pairs.
+- `/unrestrict <SYMBOL>` - Unrestrict a specific pair.
+- Dynamic pair restriction from alert messages via inline buttons.
+
+## Setup
 
 ## Setup
 
@@ -41,39 +53,93 @@ This project tracks cryptocurrency volume on Binance and sends alerts based on p
       "Binance_api_key": "YOUR_BINANCE_API_KEY",
       "Binance_secret_key": "YOUR_BINANCE_SECRET_KEY",
       "telegram_bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
-      "telegram_chat_id": "YOUR_TELEGRAM_CHAT_ID"
+      "telegram_chat_id": "YOUR_TELEGRAM_CHAT_ID",
+      "telegram_bot_token_test": "YOUR_TEST_BOT_TOKEN",
+      "telegram_chat_id_test": "YOUR_TEST_CHAT_ID",
+      "llm_api_key": "YOUR_OPENROUTER_API_KEY",
+      "llm_base_url": "https://openrouter.ai/api/v1",
+      "llm_model": "google/gemini-2.0-flash-lite-preview-02-05:free"
     }
     ```
-    **Important:** Ensure the keys for Telegram credentials are exactly `telegram_bot_token` and `telegram_chat_id` (lowercase 't').
+    **Important:** 
+    - Ensure the keys for Telegram credentials are exactly `telegram_bot_token` and `telegram_chat_id` (lowercase 't').
+    - For AI strategy advisor, get an API key from [OpenRouter](https://openrouter.ai/) (free tier available).
+    - The `llm_model` can be changed to any OpenRouter-supported model.
 
 4.  **Run the Application:**
-    The application consists of two main components that should be run concurrently in separate terminals:
+    The application consists of two main components that should be run concurrently:
 
-    a.  **Run the Telegram Bot Handler:**
-        Open a new terminal and run:
+    a.  **Run the Telegram Bot Handler** (includes AI Strategy Advisor):
         ```bash
         python telegram_bot_handler.py
         ```
-        This will start your Telegram bot, which will listen for commands and handle inline button interactions.
+        This starts the Telegram bot with all features:
+        - Volume alert management with inline buttons
+        - AI strategy analysis (`/analyze` command)
+        - Performance tracking (`/history` command)
+        - Background job that evaluates suggestion outcomes every 30 minutes
 
-    b.  **Run the Volume Alert Script:**
-        Open another terminal and run:
+    b.  **Run the Volume Alert Script** (optional, separate process):
         ```bash
         python b_volume_alerts.py
         ```
-        This script will fetch data, calculate alerts, and send them to your Telegram chat. Alerts will now include an inline button to "Restrict [SYMBOL]".
+        This script continuously monitors volume and sends alerts independently.
+        **Note:** The volume alerts are separate from the AI strategy advisor and run as a different process.
+
+    **Quick Start (Development):**
+    ```bash
+    # Terminal 1: Start the Telegram bot (includes all AI features)
+    python telegram_bot_handler.py
+    
+    # Terminal 2: Start volume monitoring (optional)
+    python b_volume_alerts.py
+    ```
 
 ## Telegram Bot Commands
 
-The Telegram bot provides the following commands for managing restricted trading pairs:
+### AI Strategy Advisor Commands
+
+*   `/analyze <SYMBOL>` - Get AI-generated trading strategy for any symbol.
+    ```
+    🤖 Strategy for BTCUSDC
+    
+    Action: LONG (Confidence: 75%)
+    Entry: 65000.0
+    TP: 70000.0
+    SL: 62000.0
+    
+    Reasoning: RSI shows oversold conditions with positive MACD divergence. 
+    Recent institutional adoption news supports bullish sentiment.
+    [📜 View Analysis Details]
+    ```
+    The "View Analysis Details" button reveals:
+    - Technical indicators (RSI, MACD, Bollinger Bands, EMA values)
+    - News headlines used in analysis
+    - Past performance on this symbol
+    - Lessons from previous failures
+
+*   `/history` - Show AI strategy performance statistics.
+    ```
+    📊 Performance History
+    
+    Total Trades: 42
+    Wins: 28
+    Losses: 14
+    Win Rate: 66.7%
+    Avg PnL: 3.24%
+    ```
+
+### Volume Alert Management Commands
 
 *   `/help` - Show a list of available commands.
     ```
     Available commands:
     /start - Start the bot
     /help - Show this help message
+    /analyze <SYMBOL> - Get AI strategy for a symbol
+    /history - Show trading performance stats
     /list_restricted - List all restricted trading pairs
-    /unrestrict <SYMBOL> - Unrestrict a specific trading pair (e.g., /unrestrict MATICBTC)
+    /unrestrict <SYMBOL> - Unrestrict a specific trading pair
     ```
 
 *   `/list_restricted` - List all currently restricted trading pairs.
@@ -92,60 +158,119 @@ The Telegram bot provides the following commands for managing restricted trading
 
 ## Scheduling with Systemd on Ubuntu
 
-To run the `b_volume_alerts.py` script periodically and manage it as a service on an Ubuntu system, you can use `systemd`. This provides more robust process management, including automatic restarts and better logging.
+To run the services as background processes on an Ubuntu system, you can use `systemd`. This provides robust process management, including automatic restarts and centralized logging.
 
-### 1. Create a Systemd Service File
+### Option 1: AI Strategy Advisor Bot (Recommended)
 
-Create a new file named `binance-volume-tracker.service` in the `/etc/systemd/system/` directory.
+This service runs the Telegram bot with all AI features including the background performance tracker.
+
+Create `/etc/systemd/system/binance-strategy-bot.service`:
 
 ```bash
-sudo nano /etc/systemd/system/binance-volume-tracker.service
+sudo nano /etc/systemd/system/binance-strategy-bot.service
 ```
 
-Add the following content to the file:
+Add the following content:
 
 ```ini
 [Unit]
-Description=Binance Volume Tracker Script
+Description=Binance AI Strategy Advisor Bot
 After=network.target
 
 [Service]
+Type=simple
 User=your_username
-WorkingDirectory=/root/volume_tracker_binance/b_volume_alerts.py
-ExecStart=/root/volume_tracker_binance/.venv/bin/python /root/volume_tracker_binance/b_volume_alerts.py
+WorkingDirectory=/path/to/your/volume_tracker_binance
+ExecStart=/path/to/your/volume_tracker_binance/.venv/bin/python /path/to/your/volume_tracker_binance/telegram_bot_handler.py
 Restart=always
+RestartSec=10
 StandardOutput=journal
 StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 ```
-*   Replace `your_username` with your actual Ubuntu username.
-*   Replace `/path/to/your/volume_tracker_binance` with the actual absolute path to your project directory.
-*   `ExecStart`: Ensure `/usr/bin/python3` is the correct path to your Python 3 interpreter (you can find it by running `which python3`).
-*   `Restart=always`  ensures the script restarts all the time after it finishes its run, it a continuous execution
 
+**Enable and start:**
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable binance-strategy-bot.service
+sudo systemctl start binance-strategy-bot.service
+```
 
-### 2. Reload Systemd and Enable the Service
+**Check status and logs:**
+```bash
+sudo systemctl status binance-strategy-bot.service
+sudo journalctl -u binance-strategy-bot.service -f
+```
 
-After creating the service file, reload the systemd daemon to recognize the new service, and then enable and start it:
+### Option 2: Volume Tracker Only
 
+If you only need volume alerts without AI features:
+
+Create `/etc/systemd/system/binance-volume-tracker.service`:
+
+```ini
+[Unit]
+Description=Binance Volume Tracker
+After=network.target
+
+[Service]
+Type=simple
+User=your_username
+WorkingDirectory=/path/to/your/volume_tracker_binance
+ExecStart=/path/to/your/volume_tracker_binance/.venv/bin/python /path/to/your/volume_tracker_binance/b_volume_alerts.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Enable and start:**
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable binance-volume-tracker.service
 sudo systemctl start binance-volume-tracker.service
 ```
 
-### 3. Check Service Status and Logs
+### Running Both Services
 
-You can check the status of your service and view its logs using:
+To run both the AI Strategy Advisor AND the Volume Tracker simultaneously:
 
 ```bash
+# Start both services
+sudo systemctl start binance-strategy-bot.service
+sudo systemctl start binance-volume-tracker.service
+
+# Check both services
+sudo systemctl status binance-strategy-bot.service
 sudo systemctl status binance-volume-tracker.service
-sudo journalctl -u binance-volume-tracker.service -f
+
+# View combined logs
+sudo journalctl -u binance-strategy-bot.service -u binance-volume-tracker.service -f
 ```
 
-This will set up the script to run as a systemd service, ensuring it restarts on failure and provides centralized logging.
+### Service Management Commands
+
+```bash
+# Start a service
+sudo systemctl start binance-strategy-bot.service
+
+# Stop a service
+sudo systemctl stop binance-strategy-bot.service
+
+# Restart a service
+sudo systemctl restart binance-strategy-bot.service
+
+# View logs
+sudo journalctl -u binance-strategy-bot.service -f
+
+# View logs since last boot
+sudo journalctl -u binance-strategy-bot.service --since today
+```
 
 ## Project Structure
 
