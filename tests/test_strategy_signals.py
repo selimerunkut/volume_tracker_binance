@@ -4,7 +4,12 @@ import sys
 import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from src.services.strategy_signals import evaluate_hourly_strategy, evaluate_daily_strategy
+from src.services.strategy_signals import (
+    describe_hourly_signal,
+    describe_daily_signal,
+    evaluate_hourly_strategy,
+    evaluate_daily_strategy,
+)
 
 def test_hourly_strategy():
     data = {
@@ -44,6 +49,26 @@ def test_daily_strategy():
     df_short = pd.DataFrame(data_short)
     signal_short = evaluate_daily_strategy(df_short)
     assert signal_short == 'SHORT'
+
+
+def test_strategy_descriptions():
+    data = {
+        'close': [100, 105, 98, 90],
+        'bb_lower': [95, 95, 95, 95],
+        'bb_middle': [100, 100, 100, 100],
+        'bb_upper': [105, 105, 105, 105],
+        'sma_12': [99, 99, 99, 99]
+    }
+    df = pd.DataFrame(data)
+    hourly_signal = evaluate_hourly_strategy(df)
+    hourly_desc = describe_hourly_signal(df, hourly_signal)
+    assert hourly_desc is not None
+    assert 'Bollinger' in hourly_desc
+
+    daily_signal = evaluate_daily_strategy(df)
+    daily_desc = describe_daily_signal(df, daily_signal)
+    assert daily_desc is not None
+    assert 'SMA(12)' in daily_desc
 
 if __name__ == "__main__":
     test_hourly_strategy()

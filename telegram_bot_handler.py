@@ -11,12 +11,14 @@ from telegram.error import TelegramError
 from symbol_manager import SymbolManager
 from src.services.watchlist_manager import WatchlistManager
 
+# pyright: reportOptionalMemberAccess=false,reportAttributeAccessIssue=false,reportArgumentType=false
+
 # Import services
 from src.services.llm_strategy import analyze_and_suggest
 from src.services.performance_tracker import track_performance
 from src.services.db_service import get_performance_stats, init_db, get_suggestion_details, get_setting, set_setting
 from src.services.db_service import get_suggestions_between_dates, get_last_analyzed_symbols
-from src.services.market_data_service import get_top_volume_pairs
+from src.services.market_data_service import get_top_volume_pairs, validate_trading_pair
 from src.services.signal_service import SignalService
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,21 @@ signal_service = SignalService(chat_id=TELEGRAM_CHAT_ID, watchlist_manager=watch
 # Initialize DB
 init_db()
 
+
+def set_pending_prompt(context, prompt_type: str) -> None:
+    user_data = context.user_data
+    if user_data is None:
+        user_data = {}
+        context.user_data = user_data
+    user_data['pending_prompt'] = prompt_type
+
+
+def pop_pending_prompt(context):
+    user_data = context.user_data
+    if not user_data:
+        return None
+    return user_data.pop('pending_prompt', None)
+
 async def get_main_menu_markup():
     """Returns the main menu keyboard markup dynamic with last 5 used symbols."""
     last_symbols = await asyncio.to_thread(get_last_analyzed_symbols, 5)
@@ -60,7 +77,7 @@ async def get_main_menu_markup():
         keyboard.append([InlineKeyboardButton(f"🔍 Analyze {symbol}", callback_data=f"menu_analyze_{symbol}")])
 
     # Add utility buttons
-    keyboard.append([InlineKeyboardButton("✍️ Analyze, type pair symbol", callback_data="menu_new_analyze")])
+    keyboard.append([InlineKeyboardButton("✍️ Analyze, enter pair symbol", callback_data="menu_new_analyze")])
     keyboard.append([
         InlineKeyboardButton("📊 History", callback_data="menu_history"),
         InlineKeyboardButton(alerts_text, callback_data="menu_toggle_alerts")
@@ -74,12 +91,13 @@ async def get_main_menu_markup():
         InlineKeyboardButton("🪄 Run Signals", callback_data="menu_run_signals"),
         InlineKeyboardButton("📚 List Watchlist", callback_data="menu_list_watch")
     ])
-    keyboard.append([InlineKeyboardButton("📊 High Volume", callback_data="menu_high_volume")])
+    keyboard.append([InlineKeyboardButton("📊 High Volume Pairs", callback_data="menu_high_volume")])
 
     return InlineKeyboardMarkup(keyboard)
 
 async def prompt_new_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Prompts the user to type a new symbol using ForceReply."""
+    set_pending_prompt(context, 'analyze')
     await update.effective_message.reply_text(
         "Please type the symbol you want to analyze (e.g., SOLUSDC):",
         reply_markup=ForceReply(selective=True)
@@ -154,6 +172,17 @@ async def watch_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.effective_message.reply_text("Usage: /watch <SYMBOL>")
         return
     symbol = context.args[0].upper()
+    is_valid, reason = await asyncio.to_thread(validate_trading_pair, symbol)
+    if not is_valid:
+        if reason == "invalid_symbol":
+            await update.effective_message.reply_text(
+                "❌ Invalid trading pair. Please provide a Binance pair symbol like BTCUSDC."
+            )
+        else:
+            await update.effective_message.reply_text(
+                "⚠️ Unable to verify the symbol right now. Please try again later."
+            )
+        return
     if watchlist_manager.add_symbol(symbol):
         await update.effective_message.reply_text(f"✅ Added {symbol} to signal watchlist.")
     else:
@@ -195,15 +224,17 @@ async def run_signals_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def prompt_watch_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    set_pending_prompt(context, 'watch')
     await update.effective_message.reply_text(
-        "Please reply with /watch SYMBOL (e.g., /watch BTCUSDC)",
+        "Please reply with the trading pair symbol (e.g., BTCUSDC) to add it to the watchlist.",
         reply_markup=ForceReply(selective=True)
     )
 
 
 async def prompt_unwatch_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    set_pending_prompt(context, 'unwatch')
     await update.effective_message.reply_text(
-        "Please reply with /unwatch SYMBOL (e.g., /unwatch BTCUSDC)",
+        "Please reply with the trading pair symbol (e.g., BTCUSDC) to remove it from the watchlist.",
         reply_markup=ForceReply(selective=True)
     )
 
@@ -227,28 +258,26 @@ async def debug_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
         user_text = update.message.text.strip()
         logger.info(f"DEBUG: Received message from {update.effective_user.username}: {user_text}")
         
-        # Check if this is a reply to the bot's prompt
+        pending_prompt = pop_pending_prompt(context)
         reply = update.message.reply_to_message
         if reply:
             logger.info(f"DEBUG: Message is a reply to: '{reply.text}'")
-            # Be flexible with matching the prompt text
-            prompt_text = reply.text.lower()
-            if "type the symbol" in prompt_text or "analyze" in prompt_text:
-                symbol = user_text.upper()
+
+        if pending_prompt:
+            symbol = user_text.upper()
+            if pending_prompt == 'analyze':
                 logger.info(f"DEBUG: Recognized symbol from prompt reply: {symbol}")
                 context.args = [symbol]
                 await analyze_symbol(update, context)
                 return
-        
-        # Fallback: If it's not a technical reply but looks like a symbol (e.g. BTCUSDC)
-        # and we haven't matched a command, and it's a short uppercase string
-        if user_text.isupper() and 3 <= len(user_text) <= 12 and not user_text.startswith('/'):
-             logger.info(f"DEBUG: Message '{user_text}' looks like a symbol. Auto-analyzing...")
-             context.args = [user_text]
-             await analyze_symbol(update, context)
-             return
-        else:
-             logger.info(f"DEBUG: Message '{user_text}' did not match symbol criteria (isupper={user_text.isupper()}, len={len(user_text)})")
+            if pending_prompt == 'watch':
+                context.args = [symbol]
+                await watch_pair(update, context)
+                return
+            if pending_prompt == 'unwatch':
+                context.args = [symbol]
+                await unwatch_pair(update, context)
+                return
 
     elif update.callback_query:
         logger.info(f"DEBUG: Received callback query from {update.effective_user.username}: {update.callback_query.data}")
@@ -334,6 +363,40 @@ async def details_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if data.get('memory_section') and "No past trades" not in data['memory_section']:
         message += f"<b>Past Performance Context</b>:\n{html.escape(data['memory_section'])}\n"
         
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=message,
+        parse_mode='HTML'
+    )
+
+
+async def signal_details_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    parts = query.data.split("|")
+    if len(parts) != 3:
+        await query.edit_message_text(text="❌ Unable to parse signal details payload.")
+        return
+
+    _, symbol, timeframe = parts
+    details = signal_service.get_signal_context(symbol, timeframe)
+
+    if not details:
+        await query.edit_message_text(text="❌ Signal explanation not available for this pair/timeframe.")
+        return
+
+    explanation = details.get('explanation', 'No additional context available.')
+    generated_at = details.get('generated_at')
+    generated_str = generated_at.strftime('%Y-%m-%d %H:%M:%S') if generated_at else 'Unknown time'
+
+    message = (
+        f"🧾 <b>{symbol} {timeframe} Signal Breakdown</b>\n\n"
+        f"<b>Action</b>: {details.get('signal', 'N/A')}\n"
+        f"{html.escape(explanation)}\n\n"
+        f"<i>Generated: {generated_str}</i>"
+    )
+
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text=message,
@@ -533,6 +596,7 @@ def main() -> None:
     
     application.add_handler(CallbackQueryHandler(restrict_callback, pattern="^restrict_"))
     application.add_handler(CallbackQueryHandler(details_callback, pattern="^details_"))
+    application.add_handler(CallbackQueryHandler(signal_details_callback, pattern="^signal_details"))
     application.add_handler(CallbackQueryHandler(history_details_callback, pattern="^history_details"))
     application.add_handler(CallbackQueryHandler(menu_callback, pattern="^menu_"))
 

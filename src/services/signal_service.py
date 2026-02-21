@@ -1,9 +1,15 @@
 import asyncio
 import logging
 from datetime import datetime
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from .market_data_service import fetch_klines
 from .technical_analysis import calculate_indicators
-from .strategy_signals import evaluate_hourly_strategy, evaluate_daily_strategy
+from .strategy_signals import (
+    evaluate_hourly_strategy,
+    evaluate_daily_strategy,
+    describe_hourly_signal,
+    describe_daily_signal,
+)
 from .watchlist_manager import WatchlistManager
 
 logger = logging.getLogger(__name__)
@@ -14,6 +20,7 @@ class SignalService:
         self.chat_id = chat_id
         self.watchlist_manager = watchlist_manager or WatchlistManager()
         self.last_signals = {}
+        self.signal_contexts = {}
 
     async def check_signals(self, timeframe='1h'):
         self.watchlist_manager.refresh()
@@ -28,17 +35,19 @@ class SignalService:
                     continue
                 
                 df = calculate_indicators(df)
-                
                 if timeframe == '1h':
                     signal = evaluate_hourly_strategy(df)
+                    explanation = describe_hourly_signal(df, signal)
                 else:
                     signal = evaluate_daily_strategy(df)
+                    explanation = describe_daily_signal(df, signal)
                 
                 if signal != 'WAIT':
                     last_key = (symbol, timeframe)
                     if self.last_signals.get(last_key) != signal:
                         self.last_signals[last_key] = signal
-                        await self.notify_signal(symbol, timeframe, signal)
+                        self.record_signal_context(symbol, timeframe, signal, explanation)
+                        await self.notify_signal(symbol, timeframe, signal, explanation)
                 else:
                     self.last_signals[(symbol, timeframe)] = 'WAIT'
                 
@@ -47,7 +56,7 @@ class SignalService:
             except Exception as e:
                 logger.error(f"Error checking {timeframe} signals for {symbol}: {e}")
 
-    async def notify_signal(self, symbol, timeframe, signal):
+    async def notify_signal(self, symbol, timeframe, signal, explanation):
         if not self.bot_context or not self.chat_id:
             logger.info(f"SIGNAL: {symbol} [{timeframe}] -> {signal}")
             return
@@ -62,10 +71,25 @@ class SignalService:
         )
         
         try:
+            keyboard = [
+                [InlineKeyboardButton("🧾 Signal details", callback_data=f"signal_details|{symbol}|{timeframe}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
             await self.bot_context.bot.send_message(
                 chat_id=self.chat_id,
-                text=message,
-                parse_mode='HTML'
+                text=message + "\n\nTap the button below to see why this signal fired.",
+                parse_mode='HTML',
+                reply_markup=reply_markup
             )
         except Exception as e:
             logger.error(f"Failed to send signal notification: {e}")
+
+    def record_signal_context(self, symbol, timeframe, signal, explanation):
+        self.signal_contexts[(symbol, timeframe)] = {
+            "signal": signal,
+            "generated_at": datetime.now(),
+            "explanation": explanation or "Signal generated from the configured strategy without additional details."
+        }
+
+    def get_signal_context(self, symbol, timeframe):
+        return self.signal_contexts.get((symbol, timeframe))

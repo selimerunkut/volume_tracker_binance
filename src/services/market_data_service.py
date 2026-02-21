@@ -95,6 +95,21 @@ def get_current_price(symbol):
         return None
 
 
+def validate_trading_pair(symbol):
+    url = f'https://api.binance.com/api/v3/ticker/price?symbol={symbol}'
+
+    try:
+        response = requests.get(url)
+        if response.status_code == 400:
+            return False, "invalid_symbol"
+        response.raise_for_status()
+        return True, None
+    except requests.exceptions.RequestException as e:
+        if hasattr(e, 'response') and e.response is not None and e.response.status_code == 400:
+            return False, "invalid_symbol"
+        return False, str(e)
+
+
 def get_top_volume_pairs(limit=20, quote_asset='USDC'):
     url = 'https://api.binance.com/api/v3/ticker/24hr'
     
