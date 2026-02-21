@@ -12,5 +12,7 @@ if ! command -v systemctl >/dev/null 2>&1; then
 fi
 
 uv sync
-sudo systemctl restart binance-strategy-bot.service
-sudo systemctl restart binance-volume-tracker.service
+systemctl restart binance-strategy-bot.service
+systemctl restart binance-volume-tracker.service
+systemctl status binance-strategy-bot.service
+systemctl status binance-volume-tracker.service
