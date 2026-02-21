@@ -90,6 +90,21 @@ except Exception as e:
 - Use `if __name__ == "__main__":` blocks for standalone testing
 - Tests directory exists but is empty
 
+## Prompt Contracts
+The project follows the Prompt Contracts mindset described in https://archive.ph/Mupi6:
+1. **Explicit Inputs and Outputs** – Every LLM invocation must document the data it consumes (market data, news, macro context, history) and the exact JSON schema it must return, so wrappers can validate the response automatically.
+2. **Minimal Assumptions** – Prompts avoid vague directives by spelling out the desired reasoning steps (technicals, news, macro, memory) and the final JSON-only answer, mirroring our current `construct_prompt` implementation.
+3. **Monitoring & Guardrails** – Responses are validated and saved (`analysis_data`, `strategy['action']`, etc.), enabling follow-up review and enforcing that downstream code never trusts unvalidated text blobs.
+4. **Feedback Loops** – The contract encourages storing execution metadata (TA summary, news summary, macro, memory) for auditing and learning, which lines up with our `analysis_data` blob persisted in the DB.
+
+### How to Talk to the Agents
+Every request should match the Prompt Contracts expected shape: provide
+1. **One GOAL** – the single thing you want the code/agent to accomplish, phrased as work to be done.
+2. **One CONSTRAINT** – an immutable rule or requirement that the implementation must respect.
+3. **One FAILURE CONDITION** – the condition that would make the task unacceptable (e.g., “tests must still pass”, “no API key leakage”, etc.).
+
+This keeps the interactions explicit, removes guesswork, and lets both you and the agents know exactly what success looks like.
+
 ### File Organization
 - Root-level scripts for main functionality
 - `memory-bank/` for project documentation

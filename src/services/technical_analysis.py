@@ -31,6 +31,8 @@ def calculate_indicators(df):
     df['ema_50'] = ta.ema(df['close'], length=50)
     df['ema_200'] = ta.ema(df['close'], length=200)
     
+    df['sma_12'] = ta.sma(df['close'], length=12)
+    
     # Bollinger Bands (20, 2)
     bbands = ta.bbands(df['close'], length=20, std=2)
     # pandas-ta returns columns with format: BBL_20_2.0_2.0, BBM_20_2.0_2.0, BBU_20_2.0_2.0

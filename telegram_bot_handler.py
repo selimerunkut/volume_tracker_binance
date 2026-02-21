@@ -4,16 +4,20 @@ import asyncio
 import html
 import logging
 from datetime import datetime, time
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.error import TelegramError
 from symbol_manager import SymbolManager
+from src.services.watchlist_manager import WatchlistManager
 
 # Import services
 from src.services.llm_strategy import analyze_and_suggest
 from src.services.performance_tracker import track_performance
 from src.services.db_service import get_performance_stats, init_db, get_suggestion_details, get_setting, set_setting
 from src.services.db_service import get_suggestions_between_dates, get_last_analyzed_symbols
+from src.services.market_data_service import get_top_volume_pairs
+from src.services.signal_service import SignalService
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,8 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
     exit()
 
 symbol_manager = SymbolManager()
+watchlist_manager = WatchlistManager()
+signal_service = SignalService(chat_id=TELEGRAM_CHAT_ID, watchlist_manager=watchlist_manager)
 
 # Initialize DB
 init_db()
@@ -52,15 +58,24 @@ async def get_main_menu_markup():
     # Add buttons for last analyzed symbols
     for symbol in last_symbols:
         keyboard.append([InlineKeyboardButton(f"🔍 Analyze {symbol}", callback_data=f"menu_analyze_{symbol}")])
-    
+
     # Add utility buttons
-    keyboard.append([InlineKeyboardButton("✍️ Type New Symbol", callback_data="menu_new_analyze")])
+    keyboard.append([InlineKeyboardButton("✍️ Analyze, type pair symbol", callback_data="menu_new_analyze")])
     keyboard.append([
         InlineKeyboardButton("📊 History", callback_data="menu_history"),
         InlineKeyboardButton(alerts_text, callback_data="menu_toggle_alerts")
     ])
-    keyboard.append([InlineKeyboardButton("📜 List Restricted", callback_data="menu_list_restricted")])
-    
+    keyboard.append([InlineKeyboardButton("📜 List Restricted Pairs", callback_data="menu_list_restricted")])
+    keyboard.append([
+        InlineKeyboardButton("➕ Watch Symbol", callback_data="menu_watch_intro"),
+        InlineKeyboardButton("➖ Unwatch Symbol", callback_data="menu_unwatch_intro")
+    ])
+    keyboard.append([
+        InlineKeyboardButton("🪄 Run Signals", callback_data="menu_run_signals"),
+        InlineKeyboardButton("📚 List Watchlist", callback_data="menu_list_watch")
+    ])
+    keyboard.append([InlineKeyboardButton("📊 High Volume", callback_data="menu_high_volume")])
+
     return InlineKeyboardMarkup(keyboard)
 
 async def prompt_new_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -84,6 +99,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "Available commands:\n"
         "/start - Start the bot\n"
         "/help - Show this help message\n"
+        "/watch <SYMBOL> - Add a pair to the signal watchlist\n"
+        "/unwatch <SYMBOL> - Remove a pair from the watchlist\n"
+        "/list_watch - Show current watchlist\n"
         "/list_restricted - List all restricted trading pairs\n"
         "/unrestrict <SYMBOL> - Unrestrict a specific trading pair\n"
         "/analyze <SYMBOL> - Get AI strategy (alias: /a)\n"
@@ -115,6 +133,79 @@ async def unrestrict_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(f"Successfully unrestricted {symbol_to_unrestrict}.")
     else:
         await update.message.reply_text(f"{symbol_to_unrestrict} is not currently restricted.")
+
+async def high_volume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    status_msg = await update.effective_message.reply_text("🔍 Fetching top volume pairs from Binance...")
+    
+    pairs = await asyncio.to_thread(get_top_volume_pairs, limit=20)
+    
+    if not pairs:
+        await status_msg.edit_text("❌ Failed to fetch top volume pairs.")
+        return
+        
+    lines = ["📊 <b>Top 20 Binance Pairs (24h Volume)</b>\n"]
+    for i, p in enumerate(pairs, 1):
+        lines.append(f"{i}. <code>{p['symbol']}</code>: ${p['volume']:,.0f}")
+        
+    await status_msg.edit_text("\n".join(lines), parse_mode='HTML')
+
+async def watch_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.effective_message.reply_text("Usage: /watch <SYMBOL>")
+        return
+    symbol = context.args[0].upper()
+    if watchlist_manager.add_symbol(symbol):
+        await update.effective_message.reply_text(f"✅ Added {symbol} to signal watchlist.")
+    else:
+        await update.effective_message.reply_text(f"ℹ️ {symbol} is already in watchlist.")
+
+async def unwatch_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.effective_message.reply_text("Usage: /unwatch <SYMBOL>")
+        return
+    symbol = context.args[0].upper()
+    if watchlist_manager.remove_symbol(symbol):
+        await update.effective_message.reply_text(f"✅ Removed {symbol} from signal watchlist.")
+    else:
+        await update.effective_message.reply_text(f"ℹ️ {symbol} not in watchlist.")
+
+async def list_watch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    watchlist = watchlist_manager.get_watchlist()
+    if not watchlist:
+        await update.effective_message.reply_text("Signal watchlist is empty.")
+    else:
+        await update.effective_message.reply_text("🔭 <b>Signal Watchlist:</b>\n" + "\n".join(watchlist), parse_mode='HTML')
+
+
+async def run_signals_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    args = [arg.lower() for arg in context.args] if context.args else []
+    timeframes = []
+    if not args or 'hourly' in args:
+        timeframes.append('1h')
+    if not args or 'daily' in args:
+        timeframes.append('1d')
+
+    notifications = []
+    for tf in timeframes:
+        await update.effective_message.reply_text(f"Running {tf} signal check...")
+        await signal_service.check_signals(timeframe=tf)
+        notifications.append(f"{tf} done")
+
+    await update.effective_message.reply_text("Signal checks completed: " + ", ".join(notifications))
+
+
+async def prompt_watch_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_message.reply_text(
+        "Please reply with /watch SYMBOL (e.g., /watch BTCUSDC)",
+        reply_markup=ForceReply(selective=True)
+    )
+
+
+async def prompt_unwatch_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_message.reply_text(
+        "Please reply with /unwatch SYMBOL (e.g., /unwatch BTCUSDC)",
+        reply_markup=ForceReply(selective=True)
+    )
 
 async def restrict_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles callback queries from inline buttons to restrict a pair."""
@@ -380,18 +471,37 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         alerts_enabled = await asyncio.to_thread(get_setting, "volume_alerts_enabled", "True") == "True"
         new_state = "False" if alerts_enabled else "True"
         await asyncio.to_thread(set_setting, "volume_alerts_enabled", new_state)
-        
+
         markup = await get_main_menu_markup()
         state_text = "ON" if new_state == "True" else "OFF"
         await query.edit_message_reply_markup(reply_markup=markup)
         await query.answer(f"Volume alerts turned {state_text}")
     elif data == "menu_new_analyze":
         await prompt_new_analysis(update, context)
+    elif data == "menu_watch_intro":
+        await prompt_watch_symbol(update, context)
+    elif data == "menu_unwatch_intro":
+        await prompt_unwatch_symbol(update, context)
+    elif data == "menu_run_signals":
+        await run_signals_command(update, context)
+    elif data == "menu_list_watch":
+        await list_watch(update, context)
+    elif data == "menu_high_volume":
+        await high_volume(update, context)
 
 async def run_tracker(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Background job to track trade performance."""
     print(f"[{datetime.now()}] Running background performance tracker...")
     await asyncio.to_thread(track_performance)
+
+async def run_hourly_signals(context: ContextTypes.DEFAULT_TYPE) -> None:
+    print(f"[{datetime.now()}] Running background hourly signal check...")
+    signal_service.bot_context = context
+    await signal_service.check_signals(timeframe='1h')
+
+async def run_daily_signals(context: ContextTypes.DEFAULT_TYPE) -> None:
+    print(f"[{datetime.now()}] Running background daily signal check...")
+    signal_service.bot_context = context
+    await signal_service.check_signals(timeframe='1d')
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors and Telegram API conflicts."""
@@ -415,6 +525,11 @@ def main() -> None:
     application.add_handler(CommandHandler("a", analyze_symbol)) # Shorthand
     application.add_handler(CommandHandler("history", show_history))
     application.add_handler(CommandHandler("alerts", toggle_alerts_command))
+    application.add_handler(CommandHandler("high_volume", high_volume))
+    application.add_handler(CommandHandler("watch", watch_pair))
+    application.add_handler(CommandHandler("unwatch", unwatch_pair))
+    application.add_handler(CommandHandler("list_watch", list_watch))
+    application.add_handler(CommandHandler("run_signals", run_signals_command))
     
     application.add_handler(CallbackQueryHandler(restrict_callback, pattern="^restrict_"))
     application.add_handler(CallbackQueryHandler(details_callback, pattern="^details_"))
@@ -428,9 +543,13 @@ def main() -> None:
     # Register error handler
     application.add_error_handler(error_handler)
 
-    # Add background job (run every 30 minutes)
     job_queue = application.job_queue
     job_queue.run_repeating(run_tracker, interval=1800, first=10)
+    test_mode = os.getenv('SIGNAL_TEST_MODE', 'False').lower() == 'true'
+    hourly_interval = 60 if test_mode else 3600
+    daily_interval = 180 if test_mode else 86400
+    job_queue.run_repeating(run_hourly_signals, interval=hourly_interval, first=20)
+    job_queue.run_repeating(run_daily_signals, interval=daily_interval, first=30)
 
     # Run the bot until the user presses Ctrl-C
     print(f"[{datetime.now()}] Telegram bot started with AI Strategy Advisor. Listening for updates...")

@@ -95,6 +95,33 @@ def get_current_price(symbol):
         return None
 
 
+def get_top_volume_pairs(limit=20, quote_asset='USDC'):
+    url = 'https://api.binance.com/api/v3/ticker/24hr'
+    
+    try:
+        print(f"[{datetime.now()}] Fetching 24h ticker data...")
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        
+        pairs = []
+        for item in data:
+            symbol = item['symbol']
+            if symbol.endswith(quote_asset):
+                pairs.append({
+                    'symbol': symbol,
+                    'volume': float(item['quoteVolume'])
+                })
+        
+        pairs.sort(key=lambda x: x['volume'], reverse=True)
+        
+        return pairs[:limit]
+        
+    except Exception as e:
+        print(f"[{datetime.now()}] Error fetching top volume pairs: {e}")
+        return []
+
+
 if __name__ == "__main__":
     print(f"[{datetime.now()}] Testing Market Data Service...")
     
