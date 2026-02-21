@@ -15,6 +15,10 @@ This file tracks the project's progress using a task list format.
 *   Updated `README.md` and `setup_bot_server.sh` with `systemd` configuration.
 *   Confirmed `systemd` service restart behavior.
 *   Created all standard Memory Bank files.
+*   Implemented **AI Strategy Advisor** Telegram bot with LLM integration and history tracking.
+*   Added dynamic UI menus and robust "command-less" symbol analysis.
+*   Improved error handling and corrective feedback for invalid Binance symbols.
+*   Fixed multiple bot stability and parsing issues.
 
 ## Current Tasks
 

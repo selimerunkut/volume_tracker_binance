@@ -9,15 +9,12 @@ This file tracks the project's current status, including recent changes, current
 
 *   Populating the Memory Bank files with project information.
 
-## Recent Changes
-
-*   Initial project setup and core script development (`b_volume_alerts.py`, `telegram_alerts.py`).
-*   Integration of TradingView and Binance trade URLs in Telegram alerts.
-*   Implementation of number formatting with thousand separators in Telegram alerts.
-*   Resolution of `ModuleNotFoundError` and `setuptools` "Multiple top-level modules" error by configuring `pyproject.toml` with `py-modules`.
-*   Transition from internal scheduling/cron to `systemd` service for robust execution.
-*   Updates to `README.md` and `setup_bot_server.sh` for `systemd` configuration.
-*   Creation of standard Memory Bank files (`productContext.md`, `activeContext.md`, `progress.md`, `decisionLog.md`, `systemPatterns.md`).
+*   Implementation of the **AI Strategy Advisor** Telegram bot with LLM integration.
+*   Added dynamic UI menu showing the last 5 analyzed symbols.
+*   Implemented robust symbol detection from plain text messages.
+*   Added typo feedback and shorthand commands (`/a`, `/anlayze`).
+*   Improved error handling for invalid Binance symbols with specific corrective suggestions.
+*   Fixed bot stability issues related to `NoneType` errors in callback handlers.
 
 ## Open Questions/Issues
 

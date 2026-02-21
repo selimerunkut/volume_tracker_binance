@@ -101,10 +101,9 @@ except Exception as e:
 - `pandas` - Data manipulation
 - `python-binance` - Binance API client
 - `numpy` - Added numpy as it's often a dependency for pandas operations, and the user mentioned np.float64
-- `python-telegram-bot[job-queue]` - Telegram bot framework with background job scheduling
-- `feedparser` - RSS news fetching for AI analysis
 - `pandas-ta` - Technical analysis indicators (RSI, MACD, Bollinger Bands)
 - `openai` - LLM integration via OpenRouter
+- `APScheduler` - Task scheduling for performance tracking
 
 ### Credentials Management
 - Store in `credentials_b.json` (gitignored)
@@ -128,13 +127,20 @@ except Exception as e:
   2. `binance-volume-tracker.service` - Volume alerts only (legacy)
 - See README.md for detailed service file templates
 
-### Smart Strategy Advisor Patterns
-
 #### Suggestion Lifecycle
 1. **Generation** (`llm_strategy.py`): Analyze symbol → Generate strategy (LONG/SHORT/WAIT) → Save to DB with full context
-2. **Storage** (`db_service.py`): Persist suggestion with `analysis_data` (TA, news, memory) as JSON
+2. **Storage** (`db_service.py`): Persist suggestion with `analysis_data` (TA, news, memory) as JSON. Use `get_last_analyzed_symbols` for dynamic UI menus.
 3. **Tracking** (`performance_tracker.py`): Background job evaluates outcomes every 30 minutes
 4. **Learning**: Past outcomes feed back into future analysis prompts via `memory_section` and `mistakes_section`
+
+#### Telegram Interaction Patterns
+- **Robust Message Parsing**: Use `update.effective_message` instead of `update.message` to handle both direct commands and `callback_query` updates.
+- **HTML Parse Mode**: Preferred over Markdown for resilience against special characters in AI-generated text. Always escape dynamic content with `html.escape()`.
+- **Typo Tolerance**: Register misspelled aliases (e.g., `/anlayze`) and provide friendly corrective hints in the response.
+- **Shorthand Commands**: Provide single-character shorthands (e.g., `/a`) for high-frequency actions.
+- **Dynamic Menus**: Update inline keyboards frequently with recent context (e.g., last 5 symbols analyzed).
+- **Flexible Symbol Detection**: In `MessageHandler`, detect uppercase strings (3-12 chars) as symbols to trigger analysis without requiring formal commands.
+- **Explicit Feedback**: When API calls fail (e.g., Binance 400), check for "invalid symbol" errors and suggest common alternatives (e.g., "Try SOLBTC instead of BTCSOL").
 
 #### WAIT Strategy Scoring
 - Window: 24 hours after suggestion

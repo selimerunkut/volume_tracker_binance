@@ -49,3 +49,13 @@ Implementation Details:
     - Modified `b_volume_alerts.py` to extract `open` and `close` prices of the current candle.
     - Passed `open_price` and `close_price` to `get_volume_alert_details` in `alert_levels_tg.py`.
     - Added a condition `close_price > open_price` in `get_volume_alert_details` to ensure alerts are only generated for candles where the closing price is higher than the opening price.
+[2026-02-21 13:10:00] - **Decision**: Use dynamic symbol buttons in the main menu.
+**Rationale**: Hardcoding symbols like BTC/ETH limits flexibility. Showing the last 5 analyzed pairs makes it easier for users to re-run common analyses without typing.
+**Implementation Details**:
+    - Created `get_last_analyzed_symbols` in `db_service.py`.
+    - Updated `get_main_menu_markup` in `telegram_bot_handler.py` to fetch these symbols at runtime.
+[2026-02-21 13:15:00] - **Decision**: Implement robust "command-less" symbol recognition.
+**Rationale**: Users often type symbols directly instead of using `/analyze` or replying to prompts. A more flexible message handler improves UX significantly.
+**Implementation Details**:
+    - Added logic to `debug_message_handler` to detect 3-12 character uppercase strings as symbols.
+    - Simplified criteria to be more inclusive while avoiding command collisions.
