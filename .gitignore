@@ -16,3 +16,7 @@ cex_volume_tracker.egg-info
 uv.lock
 .roo
 .roomodes
+bot.log
+trading_memory.db
+volume.log
+.sisyphus/boulder.json

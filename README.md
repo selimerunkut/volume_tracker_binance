@@ -122,7 +122,7 @@ This project tracks cryptocurrency volume on Binance and sends alerts based on p
     ```
     📊 Performance History
     
-    Total Trades: 42
+    Total Analysis: 42
     Wins: 28
     Losses: 14
     Win Rate: 66.7%

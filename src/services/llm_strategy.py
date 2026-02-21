@@ -11,6 +11,7 @@ from openai import OpenAI
 from .market_data_service import fetch_klines, get_current_price
 from .technical_analysis import calculate_indicators
 from .news_service import get_latest_news
+from .macro_data_service import format_macro_for_llm
 from .db_service import get_trade_history, get_recent_failures, save_suggestion, init_db
 
 # Configure logging
@@ -62,7 +63,7 @@ def get_llm_model():
     # Default to a more stable model ID
     return creds.get('llm_model', 'google/gemini-2.0-flash-001')
 
-def construct_context(ta_data, news, history, failures):
+def construct_context(ta_data, news, history, failures, macro_data):
     ta_summary = "Technical Indicators:\n"
     if ta_data is not None and not ta_data.empty:
         latest = ta_data.iloc[-1]
@@ -77,8 +78,11 @@ def construct_context(ta_data, news, history, failures):
         ta_summary += "No technical data available.\n"
 
     news_summary = "Recent Crypto News:\n"
-    for item in news[:5]:  # Top 5 headlines
-        news_summary += f"- {item['title']} (Source: {item['source']})\n"
+    for item in news[:5]:
+        title = item['title'].replace('"', "'").replace('\n', ' ')
+        news_summary += f"- {title} (Source: {item['source']})\n"
+    
+    macro_summary = macro_data
     
     memory_section = "Your Past Performance on this Symbol:\n"
     if history:
@@ -92,13 +96,14 @@ def construct_context(ta_data, news, history, failures):
     mistakes_section = "General Lessons from Past Failures:\n"
     if failures:
         for fail in failures[:3]:
-            mistakes_section += f"- Failed {fail['strategy_type']} on {fail['symbol']}: {fail['reasoning'][:100]}...\n"
+            reasoning = fail['reasoning'][:100].replace('"', "'").replace('\n', ' ')
+            mistakes_section += f"- Failed {fail['strategy_type']} on {fail['symbol']}: {reasoning}...\n"
     else:
         mistakes_section += "No significant failures recorded yet.\n"
         
-    return ta_summary, news_summary, memory_section, mistakes_section
+    return ta_summary, news_summary, macro_summary, memory_section, mistakes_section
 
-def construct_prompt(symbol, price_data, ta_summary, news_summary, memory_section, mistakes_section):
+def construct_prompt(symbol, price_data, ta_summary, news_summary, macro_summary, memory_section, mistakes_section):
     prompt = f"""
 You are a professional crypto trading advisor. Analyze the following data for {symbol} and suggest a trading strategy.
 
@@ -109,16 +114,20 @@ Current Price: {price_data.get('current_price', 'N/A')}
 
 {news_summary}
 
+MACRO CONTEXT (Consider overall market conditions):
+{macro_summary}
+
 MEMORY (Learn from this):
 {memory_section}
 {mistakes_section}
 
 INSTRUCTIONS:
-1. Analyze the technicals and news sentiment.
+1. Analyze the technicals, news sentiment, and macro conditions.
 2. Consider your past performance (wins/losses). If you lost recently, adjust your strategy to avoid the same mistake.
-3. Determine if there is a Setup (LONG, SHORT, or WAIT).
-4. If LONG or SHORT, provide Entry, Take Profit (TP), and Stop Loss (SL).
-5. Provide a brief reasoning (max 2 sentences).
+3. Consider macro conditions - Fed rate changes and Nasdaq trends affect crypto.
+4. Determine if there is a Setup (LONG, SHORT, or WAIT).
+5. If LONG or SHORT, provide Entry, Take Profit (TP), and Stop Loss (SL).
+6. Provide a brief reasoning (max 2 sentences).
 
 OUTPUT FORMAT (JSON ONLY):
 {{
@@ -154,16 +163,19 @@ def analyze_and_suggest(symbol):
         # 3. Fetch News
         news = get_latest_news()
         
-        # 4. Fetch Memory
+        # 4. Fetch Macro Data (Fed rates, Nasdaq)
+        macro_data = format_macro_for_llm()
+        
+        # 5. Fetch Memory
         history = get_trade_history(symbol, limit=5)
         failures = get_recent_failures(limit=5)
         
         price_data = {"current_price": current_price}
-        ta_summary, news_summary, memory_section, mistakes_section = construct_context(
-            ta_df, news, history, failures
+        ta_summary, news_summary, macro_summary, memory_section, mistakes_section = construct_context(
+            ta_df, news, history, failures, macro_data
         )
         prompt = construct_prompt(
-            symbol, price_data, ta_summary, news_summary, memory_section, mistakes_section
+            symbol, price_data, ta_summary, news_summary, macro_summary, memory_section, mistakes_section
         )
         
         client = get_llm_client()
@@ -189,6 +201,7 @@ def analyze_and_suggest(symbol):
         analysis_data = {
             'ta_summary': ta_summary,
             'news_summary': news_summary,
+            'macro_summary': macro_summary,
             'memory_section': memory_section,
             'mistakes_section': mistakes_section,
             'current_price': current_price

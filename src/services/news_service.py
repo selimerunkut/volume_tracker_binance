@@ -1,97 +1,128 @@
 """
 Crypto news service that fetches headlines from RSS feeds.
-Supports CoinDesk and Cointelegraph feeds.
+Supports multiple crypto and financial news sources.
 """
 import feedparser
+import os
+import json
 from datetime import datetime
 from typing import List, Dict
 
 
-# RSS Feed URLs
-FEEDS = {
-    "CoinDesk": "https://feeds.feedburner.com/CoinDesk",
-    "Cointelegraph": "https://cointelegraph.com/rss",
+CREDENTIALS_FILE = 'credentials_b.json'
+
+
+def load_credentials():
+    try:
+        if os.path.exists(CREDENTIALS_FILE):
+            with open(CREDENTIALS_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[{datetime.now()}] Error loading credentials: {e}")
+    return {}
+
+
+RSS_FEEDS = {
+    "Crypto": {
+        "CoinDesk": "https://feeds.feedburner.com/CoinDesk",
+        "Cointelegraph": "https://cointelegraph.com/rss",
+        "Bitcoinist": "https://bitcoinist.com/feed/",
+        "Decrypt": "https://decrypt.co/feed",
+    },
+    "Markets": {
+        "Yahoo Finance Crypto": "https://finance.yahoo.com/rss/symbol?sBTC-USD",
+    },
+    "Risk-On": {
+        "CNBC": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+    },
 }
 
 
-def get_latest_news(limit: int = 5) -> List[Dict[str, str]]:
-    """
-    Fetch latest crypto news from configured RSS feeds.
-    
-    Args:
-        limit: Maximum number of news items to return per feed
+def fetch_feed(source_name: str, feed_url: str, limit: int = 3) -> List[Dict]:
+    news_items = []
+    try:
+        feed = feedparser.parse(feed_url)
         
-    Returns:
-        List of news items with structure: {title, summary, published, source}
-    """
+        if feed.bozo:
+            print(f"[{datetime.now()}] WARNING: Feed parsing issue for {source_name}")
+        
+        entries = feed.entries[:limit] if hasattr(feed, 'entries') else []
+        
+        for entry in entries:
+            title = getattr(entry, 'title', 'No title') or 'No title'
+            
+            summary = getattr(entry, 'summary', None)
+            if not summary:
+                summary = getattr(entry, 'description', None)
+            if not summary:
+                content = getattr(entry, 'content', None)
+                if content and isinstance(content, list) and len(content) > 0:
+                    summary = content[0].get('value', 'No summary')
+            
+            if isinstance(summary, str) and len(summary) > 200:
+                summary = summary[:200] + '...'
+            elif not summary:
+                summary = 'No summary available'
+            
+            published = getattr(entry, 'published', 'Unknown date') or 'Unknown date'
+            
+            news_items.append({
+                'title': title.strip(),
+                'summary': summary.strip() if isinstance(summary, str) else summary,
+                'published': published,
+                'source': source_name,
+            })
+        
+    except Exception as e:
+        print(f"[{datetime.now()}] ERROR fetching {source_name}: {e}")
+    
+    return news_items
+
+
+def get_latest_news(limit: int = 5) -> List[Dict[str, str]]:
     all_news = []
+    seen_titles = set()
     
-    for source_name, feed_url in FEEDS.items():
-        try:
-            print(f"[{datetime.now()}] Fetching news from {source_name}...")
-            feed = feedparser.parse(feed_url)
+    for category, feeds in RSS_FEEDS.items():
+        for source_name, feed_url in feeds.items():
+            news = fetch_feed(source_name, feed_url, limit=2)
             
-            if feed.bozo:
-                print(f"[{datetime.now()}] WARNING: Feed parsing issue for {source_name}: {feed.bozo_exception}")
-            
-            entries = feed.entries[:limit] if hasattr(feed, "entries") else []
-            
-            for entry in entries:
-                title = getattr(entry, "title", "No title") or "No title"
-                
-                summary = getattr(entry, "summary", None)
-                if not summary:
-                    summary = getattr(entry, "description", None)
-                if not summary:
-                    summary = getattr(entry, "content", None)
-                    if summary and isinstance(summary, list) and len(summary) > 0:
-                        summary = summary[0].get("value", "No summary available")
-                
-                if isinstance(summary, str):
-                    if len(summary) > 200:
-                        summary = summary[:200] + "..."
-                else:
-                    summary = "No summary available"
-                
-                published = getattr(entry, "published", "Unknown date") or "Unknown date"
-                
-                news_item = {
-                    "title": title,
-                    "summary": summary,
-                    "published": published,
-                    "source": source_name,
-                }
-                all_news.append(news_item)
-                
-            print(f"[{datetime.now()}] Successfully fetched {len(entries)} items from {source_name}")
-            
-        except Exception as e:
-            print(f"[{datetime.now()}] ERROR fetching news from {source_name}: {e}")
-            continue
+            for item in news:
+                title_key = item['title'][:50].lower()
+                if title_key not in seen_titles:
+                    seen_titles.add(title_key)
+                    item['category'] = category
+                    all_news.append(item)
     
-    # Return limited total news items
     all_news = all_news[:limit]
     
     print(f"[{datetime.now()}] Total news items retrieved: {len(all_news)}")
     return all_news
 
 
-def format_news_for_llm(news_items):
-    """
-    Format news items for LLM prompt.
+def get_macro_news() -> List[Dict]:
+    macro_feeds = {
+        "CNBC Economy": "https://www.cnbc.com/id/10000664/device/rss/rss.html",
+        "Yahoo Finance Markets": "https://finance.yahoo.com/rss/markets",
+    }
     
-    Args:
-        news_items: List of news item dicts
+    news = []
+    for source_name, feed_url in macro_feeds.items():
+        news.extend(fetch_feed(source_name, feed_url, limit=2))
     
-    Returns:
-        str: Formatted news string
-    """
+    return news[:5]
+
+
+def format_news_for_llm(news_items: List[Dict], include_category: bool = True) -> str:
     if not news_items:
         return "No recent news available."
     
     formatted = []
     for item in news_items:
-        formatted.append(f"- [{item['source']}] {item['title']}")
+        if include_category and 'category' in item:
+            formatted.append(f"- [{item['source']}] [{item['category']}] {item['title']}")
+        else:
+            formatted.append(f"- [{item['source']}] {item['title']}")
     
     return "\n".join(formatted)
 
