@@ -12,7 +12,7 @@ from symbol_manager import SymbolManager
 # Import services
 from src.services.llm_strategy import analyze_and_suggest
 from src.services.performance_tracker import track_performance
-from src.services.db_service import get_performance_stats, init_db, get_suggestion_details
+from src.services.db_service import get_performance_stats, init_db, get_suggestion_details, get_setting, set_setting
 from src.services.db_service import get_suggestions_between_dates, get_last_analyzed_symbols
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,9 @@ async def get_main_menu_markup():
     """Returns the main menu keyboard markup dynamic with last 5 used symbols."""
     last_symbols = await asyncio.to_thread(get_last_analyzed_symbols, 5)
     
+    alerts_enabled = await asyncio.to_thread(get_setting, "volume_alerts_enabled", "True") == "True"
+    alerts_text = "🔔 Alerts: ON" if alerts_enabled else "🔕 Alerts: OFF"
+    
     keyboard = []
     # Add buttons for last analyzed symbols
     for symbol in last_symbols:
@@ -52,7 +55,10 @@ async def get_main_menu_markup():
     
     # Add utility buttons
     keyboard.append([InlineKeyboardButton("✍️ Type New Symbol", callback_data="menu_new_analyze")])
-    keyboard.append([InlineKeyboardButton("📊 Show History", callback_data="menu_history")])
+    keyboard.append([
+        InlineKeyboardButton("📊 History", callback_data="menu_history"),
+        InlineKeyboardButton(alerts_text, callback_data="menu_toggle_alerts")
+    ])
     keyboard.append([InlineKeyboardButton("📜 List Restricted", callback_data="menu_list_restricted")])
     
     return InlineKeyboardMarkup(keyboard)
@@ -82,6 +88,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/unrestrict <SYMBOL> - Unrestrict a specific trading pair\n"
         "/analyze <SYMBOL> - Get AI strategy (alias: /a)\n"
         "/history - Show trading performance stats\n"
+        "/alerts - Toggle volume alerts on/off\n"
     )
     markup = await get_main_menu_markup()
     await update.effective_message.reply_text(help_text, reply_markup=markup)
@@ -345,6 +352,15 @@ async def history_details_callback(update: Update, context: ContextTypes.DEFAULT
         parse_mode='Markdown'
     )
 
+async def toggle_alerts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    alerts_enabled = await asyncio.to_thread(get_setting, "volume_alerts_enabled", "True") == "True"
+    new_state = "False" if alerts_enabled else "True"
+    await asyncio.to_thread(set_setting, "volume_alerts_enabled", new_state)
+    
+    state_text = "ENABLED" if new_state == "True" else "DISABLED"
+    markup = await get_main_menu_markup()
+    await update.effective_message.reply_text(f"Volume alerts are now {state_text}.", reply_markup=markup)
+
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles callback queries from the main menu buttons."""
     query = update.callback_query
@@ -360,6 +376,15 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await show_history(update, context)
     elif data == "menu_list_restricted":
         await list_restricted(update, context)
+    elif data == "menu_toggle_alerts":
+        alerts_enabled = await asyncio.to_thread(get_setting, "volume_alerts_enabled", "True") == "True"
+        new_state = "False" if alerts_enabled else "True"
+        await asyncio.to_thread(set_setting, "volume_alerts_enabled", new_state)
+        
+        markup = await get_main_menu_markup()
+        state_text = "ON" if new_state == "True" else "OFF"
+        await query.edit_message_reply_markup(reply_markup=markup)
+        await query.answer(f"Volume alerts turned {state_text}")
     elif data == "menu_new_analyze":
         await prompt_new_analysis(update, context)
 
@@ -389,6 +414,7 @@ def main() -> None:
     application.add_handler(CommandHandler("analyze", analyze_symbol))
     application.add_handler(CommandHandler("a", analyze_symbol)) # Shorthand
     application.add_handler(CommandHandler("history", show_history))
+    application.add_handler(CommandHandler("alerts", toggle_alerts_command))
     
     application.add_handler(CallbackQueryHandler(restrict_callback, pattern="^restrict_"))
     application.add_handler(CallbackQueryHandler(details_callback, pattern="^details_"))

@@ -1,8 +1,10 @@
 # telegram_alerts.py
+import datetime
+import json
 import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-import json
-import datetime # Import datetime for timestamping error messages
+
+from src.services.db_service import get_setting
 
 # Load Telegram bot token and chat ID from credentials_b.json
 def load_telegram_credentials():
@@ -23,6 +25,9 @@ if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
     print(f"[{datetime.datetime.now()}] Telegram bot token or chat ID not found. Alerts will not be sent.")
 
 def send_telegram_message(alert_message, include_restrict_button=False, dry_run=False):
+    if get_setting("volume_alerts_enabled", "True") == "False":
+        print(f"[{datetime.datetime.now()}] Alerts disabled. Skipping Telegram message for {alert_message.get('symbol', 'UNKNOWN')}.")
+        return False
     # Use the globally loaded TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
     bot_token = TELEGRAM_BOT_TOKEN
     chat_id = TELEGRAM_CHAT_ID

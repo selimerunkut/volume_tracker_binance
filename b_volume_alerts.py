@@ -7,7 +7,9 @@ from binance.client import Client
 import datetime
 import time
 from alert_levels_tg import get_volume_alert_details
-from telegram_alerts import send_telegram_message  # Import the Telegram alert function
+from telegram_alerts import send_telegram_message
+from src.services.db_service import get_setting
+
 
 # File to store the state of sent alerts
 STATE_FILE = 'alert_state.json'
@@ -244,7 +246,12 @@ def run_script(dry_run=False):
                     continue # Skip sending this alert
 
                 else: # Only proceed if it's NOT a duplicate
+                    if get_setting("volume_alerts_enabled", "True") == "False":
+                        print(f"[{datetime.datetime.now()}] Skipping Telegram message for {symbol} - Alerts are DISABLED in settings.")
+                        continue
+
                     alert_message = create_alert_message(alert_detail, last_2h_volume, last_4h_volume, last_completed_hour_volume, open_price, close_price, symbol)
+
                     print(f"[{datetime.datetime.now()}] Sending Telegram message for {symbol} (Level: {level})...")
                     # Always call send_telegram_message, let it handle dry_run internally
                     if send_telegram_message(alert_message, include_restrict_button=True, dry_run=dry_run):

@@ -136,7 +136,6 @@ except Exception as e:
 #### Telegram Interaction Patterns
 - **Robust Message Parsing**: Use `update.effective_message` instead of `update.message` to handle both direct commands and `callback_query` updates.
 - **HTML Parse Mode**: Preferred over Markdown for resilience against special characters in AI-generated text. Always escape dynamic content with `html.escape()`.
-- **Typo Tolerance**: Register misspelled aliases (e.g., `/anlayze`) and provide friendly corrective hints in the response.
 - **Shorthand Commands**: Provide single-character shorthands (e.g., `/a`) for high-frequency actions.
 - **Dynamic Menus**: Update inline keyboards frequently with recent context (e.g., last 5 symbols analyzed).
 - **Flexible Symbol Detection**: In `MessageHandler`, detect uppercase strings (3-12 chars) as symbols to trigger analysis without requiring formal commands.

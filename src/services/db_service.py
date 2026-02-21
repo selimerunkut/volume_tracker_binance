@@ -1,11 +1,13 @@
 """
 Database Service - SQLite storage for trade suggestions and outcomes
 """
+import json
+import os
 import sqlite3
 from datetime import datetime
-import json
 
-DB_PATH = 'trading_memory.db'
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+DB_PATH = os.path.join(PROJECT_ROOT, 'trading_memory.db')
 
 
 def get_connection():
@@ -42,9 +44,54 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    ''')
+
     conn.commit()
     conn.close()
     print(f"[{datetime.now()}] Database initialized at {DB_PATH}")
+
+
+def get_setting(key, default=None):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
+        row = cursor.fetchone()
+    except sqlite3.OperationalError:
+        conn.close()
+        return default
+    conn.close()
+    if row:
+        return row['value']
+    return default
+
+
+def set_setting(key, value):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT OR REPLACE INTO settings (key, value)
+            VALUES (?, ?)
+        ''', (key, str(value)))
+        conn.commit()
+        conn.close()
+    except sqlite3.OperationalError:
+        conn.close()
+        init_db()
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT OR REPLACE INTO settings (key, value)
+            VALUES (?, ?)
+        ''', (key, str(value)))
+        conn.commit()
+        conn.close()
 
 
 def save_suggestion(symbol, strategy_type, entry_price, take_profit, stop_loss, reasoning, analysis_data=None):
