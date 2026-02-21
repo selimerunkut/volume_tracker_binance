@@ -272,6 +272,22 @@ sudo journalctl -u binance-strategy-bot.service -f
 sudo journalctl -u binance-strategy-bot.service --since today
 ```
 
+## Deployment Automation (Server)
+
+After a git pull on the server, run:
+
+```bash
+./scripts/deploy_after_pull.sh
+```
+
+To automatically run this after every `git pull`, install the post-merge hook once:
+
+```bash
+./scripts/install_post_merge_hook.sh
+```
+
+The hook runs `uv sync` and restarts both systemd services after each merge/pull.
+
 ## Project Structure
 
 -   `b_volume_alerts.py`: Main script for fetching data, calculating alerts, and sending messages.
