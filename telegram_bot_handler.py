@@ -4,8 +4,8 @@ import asyncio
 import html
 import logging
 from datetime import datetime, time
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.error import TelegramError
 from symbol_manager import SymbolManager
 
@@ -13,7 +13,7 @@ from symbol_manager import SymbolManager
 from src.services.llm_strategy import analyze_and_suggest
 from src.services.performance_tracker import track_performance
 from src.services.db_service import get_performance_stats, init_db, get_suggestion_details
-from src.services.db_service import get_suggestions_between_dates
+from src.services.db_service import get_suggestions_between_dates, get_last_analyzed_symbols
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +41,36 @@ symbol_manager = SymbolManager()
 # Initialize DB
 init_db()
 
+async def get_main_menu_markup():
+    """Returns the main menu keyboard markup dynamic with last 5 used symbols."""
+    last_symbols = await asyncio.to_thread(get_last_analyzed_symbols, 5)
+    
+    keyboard = []
+    # Add buttons for last analyzed symbols
+    for symbol in last_symbols:
+        keyboard.append([InlineKeyboardButton(f"🔍 Analyze {symbol}", callback_data=f"menu_analyze_{symbol}")])
+    
+    # Add utility buttons
+    keyboard.append([InlineKeyboardButton("✍️ Type New Symbol", callback_data="menu_new_analyze")])
+    keyboard.append([InlineKeyboardButton("📊 Show History", callback_data="menu_history")])
+    keyboard.append([InlineKeyboardButton("📜 List Restricted", callback_data="menu_list_restricted")])
+    
+    return InlineKeyboardMarkup(keyboard)
+
+async def prompt_new_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Prompts the user to type a new symbol using ForceReply."""
+    await update.effective_message.reply_text(
+        "Please type the symbol you want to analyze (e.g., SOLUSDC):",
+        reply_markup=ForceReply(selective=True)
+    )
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a welcome message when the command /start is issued."""
-    await update.message.reply_text('Hi! I am your crypto volume alert bot. Use /help to see available commands.')
+    markup = await get_main_menu_markup()
+    await update.effective_message.reply_text(
+        'Hi! I am your crypto volume alert bot. Use the buttons below or see /help for commands.',
+        reply_markup=markup
+    )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a message when the command /help is issued."""
@@ -52,11 +79,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/start - Start the bot\n"
         "/help - Show this help message\n"
         "/list_restricted - List all restricted trading pairs\n"
-        "/unrestrict <SYMBOL> - Unrestrict a specific trading pair (e.g., /unrestrict MATICBTC)\n"
-        "/analyze <SYMBOL> - Get AI strategy for a symbol\n"
+        "/unrestrict <SYMBOL> - Unrestrict a specific trading pair\n"
+        "/analyze <SYMBOL> - Get AI strategy (aliases: /a, /anlayze)\n"
         "/history - Show trading performance stats\n"
     )
-    await update.message.reply_text(help_text)
+    markup = await get_main_menu_markup()
+    await update.effective_message.reply_text(help_text, reply_markup=markup)
 
 async def list_restricted(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Lists all restricted trading pairs."""
@@ -65,7 +93,9 @@ async def list_restricted(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         message = "Restricted pairs:\n" + "\n".join(sorted(list(restricted)))
     else:
         message = "No trading pairs are currently restricted."
-    await update.message.reply_text(message)
+    
+    # Use effective_message which works for both message and callback_query
+    await update.effective_message.reply_text(message)
 
 async def unrestrict_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Unrestricts a specific trading pair."""
@@ -90,14 +120,56 @@ async def restrict_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     else:
         await query.edit_message_text(text=f"{symbol_to_restrict} is already restricted.")
 
+async def debug_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Logs every incoming message and handles ForceReply inputs."""
+    if not update.message:
+        return
+
+    if update.message.text:
+        user_text = update.message.text.strip()
+        logger.info(f"DEBUG: Received message from {update.effective_user.username}: {user_text}")
+        
+        # Check if this is a reply to the bot's prompt
+        reply = update.message.reply_to_message
+        if reply:
+            logger.info(f"DEBUG: Message is a reply to: '{reply.text}'")
+            # Be flexible with matching the prompt text
+            prompt_text = reply.text.lower()
+            if "type the symbol" in prompt_text or "analyze" in prompt_text:
+                symbol = user_text.upper()
+                logger.info(f"DEBUG: Recognized symbol from prompt reply: {symbol}")
+                context.args = [symbol]
+                await analyze_symbol(update, context)
+                return
+        
+        # Fallback: If it's not a technical reply but looks like a symbol (e.g. BTCUSDC)
+        # and we haven't matched a command, and it's a short uppercase string
+        if user_text.isupper() and 3 <= len(user_text) <= 12 and not user_text.startswith('/'):
+             logger.info(f"DEBUG: Message '{user_text}' looks like a symbol. Auto-analyzing...")
+             context.args = [user_text]
+             await analyze_symbol(update, context)
+             return
+        else:
+             logger.info(f"DEBUG: Message '{user_text}' did not match symbol criteria (isupper={user_text.isupper()}, len={len(user_text)})")
+
+    elif update.callback_query:
+        logger.info(f"DEBUG: Received callback query from {update.effective_user.username}: {update.callback_query.data}")
+
 async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Analyzes a symbol using AI strategy."""
+    logger.info(f"DEBUG: analyze_symbol reached with args: {context.args}")
     if not context.args:
-        await update.message.reply_text("Usage: /analyze &lt;SYMBOL&gt; (e.g., /analyze BTCUSDC)")
+        await update.effective_message.reply_text("Usage: /analyze <SYMBOL> (e.g., /analyze BTCUSDC)")
         return
 
     symbol = context.args[0].upper()
-    status_msg = await update.message.reply_text(f"🔍 Analyzing {symbol}... This may take a moment.")
+    logger.info(f"DEBUG: Processing analysis for symbol: {symbol}")
+    
+    typo_note = ""
+    if update.message and update.message.text and "/anlayze" in update.message.text.lower():
+        typo_note = "\n\n<i>(I noticed a typo, but I'll analyze that for you anyway! 😉)</i>"
+
+    status_msg = await update.effective_message.reply_text(f"🔍 Analyzing {symbol}... This may take a moment.")
 
     try:
         # Run analysis in a separate thread to not block the bot
@@ -130,6 +202,7 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
         
         response += f"<b>Reasoning</b>: {reasoning}"
+        response += typo_note
         
         reply_markup = None
         if strategy.get('suggestion_id'):
@@ -217,7 +290,7 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=reply_markup)
+    await update.effective_message.reply_text(msg, parse_mode='Markdown', reply_markup=reply_markup)
 
 
 def parse_date_arg(date_text: str) -> datetime:
@@ -273,6 +346,24 @@ async def history_details_callback(update: Update, context: ContextTypes.DEFAULT
         parse_mode='Markdown'
     )
 
+async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles callback queries from the main menu buttons."""
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if data.startswith("menu_analyze_"):
+        symbol = data.replace("menu_analyze_", "")
+        context.args = [symbol]
+        await analyze_symbol(update, context)
+    elif data == "menu_history":
+        context.args = [] # Clear args for show_history
+        await show_history(update, context)
+    elif data == "menu_list_restricted":
+        await list_restricted(update, context)
+    elif data == "menu_new_analyze":
+        await prompt_new_analysis(update, context)
+
 async def run_tracker(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Background job to track trade performance."""
     print(f"[{datetime.now()}] Running background performance tracker...")
@@ -297,11 +388,18 @@ def main() -> None:
     application.add_handler(CommandHandler("list_restricted", list_restricted))
     application.add_handler(CommandHandler("unrestrict", unrestrict_pair))
     application.add_handler(CommandHandler("analyze", analyze_symbol))
+    application.add_handler(CommandHandler("anlayze", analyze_symbol)) # Alias for common typo
+    application.add_handler(CommandHandler("a", analyze_symbol)) # Shorthand
     application.add_handler(CommandHandler("history", show_history))
     
     application.add_handler(CallbackQueryHandler(restrict_callback, pattern="^restrict_"))
     application.add_handler(CallbackQueryHandler(details_callback, pattern="^details_"))
     application.add_handler(CallbackQueryHandler(history_details_callback, pattern="^history_details"))
+    application.add_handler(CallbackQueryHandler(menu_callback, pattern="^menu_"))
+
+    # Register debug message handler (filters out commands to avoid double logging if desired, 
+    # but here we want to see EVERYTHING)
+    application.add_handler(MessageHandler(filters.ALL, debug_message_handler), group=-1)
 
     # Register error handler
     application.add_error_handler(error_handler)

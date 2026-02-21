@@ -147,6 +147,27 @@ def get_trade_history(symbol=None, limit=10):
     return [dict(row) for row in rows]
 
 
+def get_last_analyzed_symbols(limit=5):
+    """Get the most recently analyzed unique symbols."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT symbol FROM (
+            SELECT symbol, MAX(created_at) as last_created 
+            FROM suggestions 
+            GROUP BY symbol 
+            ORDER BY last_created DESC 
+            LIMIT ?
+        )
+    ''', (limit,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [row['symbol'] for row in rows]
+
+
 def get_recent_failures(limit=5):
     """Get recent losing trades for learning."""
     conn = get_connection()

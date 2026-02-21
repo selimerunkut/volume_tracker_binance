@@ -155,7 +155,7 @@ def analyze_and_suggest(symbol):
         
         if klines is None or klines.empty:
             logger.error(f"Failed to fetch market data for {symbol}")
-            return None
+            return {"error": f"Failed to fetch market data for {symbol}. Is it a valid Binance symbol? (e.g. SOLBTC instead of BTCSOL)"}
             
         # 2. Calculate TA
         ta_df = calculate_indicators(klines)

@@ -24,6 +24,9 @@ def fetch_klines(symbol, interval='1h', limit=100):
     try:
         print(f"[{datetime.now()}] Fetching data for {symbol}...")
         response = requests.get(url)
+        if response.status_code == 400:
+            print(f"[{datetime.now()}] Invalid symbol or parameter error for {symbol} (HTTP 400)")
+            return pd.DataFrame()
         response.raise_for_status()
         data = response.json()
         
@@ -73,6 +76,9 @@ def get_current_price(symbol):
     try:
         print(f"[{datetime.now()}] Fetching current price for {symbol}...")
         response = requests.get(url)
+        if response.status_code == 400:
+            print(f"[{datetime.now()}] Invalid symbol or parameter error for {symbol} (HTTP 400)")
+            return None
         response.raise_for_status()
         data = response.json()
         price = float(data['price'])
