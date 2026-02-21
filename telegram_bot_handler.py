@@ -18,6 +18,7 @@ from src.services.llm_strategy import analyze_and_suggest
 from src.services.performance_tracker import track_performance
 from src.services.db_service import get_performance_stats, init_db, get_suggestion_details, get_setting, set_setting
 from src.services.db_service import get_suggestions_between_dates, get_last_analyzed_symbols
+from src.services.binance_permissions_service import permissions_service
 from src.services.market_data_service import get_top_volume_pairs, validate_trading_pair
 from src.services.signal_service import SignalService
 
@@ -177,6 +178,11 @@ async def watch_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         if reason == "invalid_symbol":
             await update.effective_message.reply_text(
                 "❌ Invalid trading pair. Please provide a Binance pair symbol like BTCUSDC."
+            )
+        elif reason == "not_permitted":
+            trading_group = permissions_service.trading_group or "your trading group"
+            await update.effective_message.reply_text(
+                f"❌ {symbol} is not enabled for {trading_group}. Binance only allows pairs returned by /api/v3/exchangeInfo?permissions={trading_group}."
             )
         else:
             await update.effective_message.reply_text(

@@ -8,6 +8,7 @@ import datetime
 import time
 from alert_levels_tg import get_volume_alert_details
 from telegram_alerts import send_telegram_message
+from src.services.binance_permissions_service import permissions_service
 from src.services.db_service import get_setting
 
 
@@ -182,6 +183,17 @@ def run_script(dry_run=False):
     btc_pairs = [s for s in get_filtered_symbols(client, 'BTC') if s not in excluded_symbols]
                    
     all_pairs = usdc_pairs + btc_pairs
+
+    allowed_symbols = permissions_service.get_allowed_symbols()
+    if allowed_symbols:
+        trading_group_label = permissions_service.trading_group or 'your trading group'
+        filtered_pairs = [s for s in all_pairs if s in allowed_symbols]
+        print(f"[{datetime.datetime.now()}] {len(filtered_pairs)} of {len(all_pairs)} pairs match trading group {trading_group_label}.")
+        all_pairs = filtered_pairs
+    elif allowed_symbols is None:
+        print(f"[{datetime.datetime.now()}] Unable to retrieve trading-group permissions; volume alerts will consider all fetched pairs.")
+    else:
+        print(f"[{datetime.datetime.now()}] No tradable pairs returned for {permissions_service.trading_group or 'the trading group'}; skipping permission filtering.")
     
     print(f"[{datetime.datetime.now()}] Fetched {len(usdc_pairs)} USDC pairs and {len(btc_pairs)} BTC pairs. Total: {len(all_pairs)} pairs.")
     
@@ -231,40 +243,38 @@ def run_script(dry_run=False):
                     print(f"[{datetime.datetime.now()}] Alerts generated for {symbol}: {len(alert_details_list)}")
                 else:
                     print(f"[{datetime.datetime.now()}] No alerts for {symbol}.")
+                for alert_detail in alert_details_list:
+                    symbol = alert_detail['symbol']
+                    level = alert_detail['level']
                     
-            for alert_detail in alert_details_list:
-                symbol = alert_detail['symbol']
-                level = alert_detail['level']
-                
-                # Check if the symbol is in the restricted list before proceeding
-                if symbol_manager.is_symbol_excluded(symbol):
-                    print(f"[{datetime.datetime.now()}] Skipping alert for restricted symbol: {symbol}")
-                    continue
-
-                if is_duplicate_alert(symbol, level, curr_volume):
-                    # The DEBUG print inside is_duplicate_alert is sufficient
-                    continue # Skip sending this alert
-
-                else: # Only proceed if it's NOT a duplicate
-                    if get_setting("volume_alerts_enabled", "True") == "False":
-                        print(f"[{datetime.datetime.now()}] Skipping Telegram message for {symbol} - Alerts are DISABLED in settings.")
+                    # Check if the symbol is in the restricted list before proceeding
+                    if symbol_manager.is_symbol_excluded(symbol):
+                        print(f"[{datetime.datetime.now()}] Skipping alert for restricted symbol: {symbol}")
                         continue
 
-                    alert_message = create_alert_message(alert_detail, last_2h_volume, last_4h_volume, last_completed_hour_volume, open_price, close_price, symbol)
+                    if is_duplicate_alert(symbol, level, curr_volume):
+                        # The DEBUG print inside is_duplicate_alert is sufficient
+                        continue # Skip sending this alert
 
-                    print(f"[{datetime.datetime.now()}] Sending Telegram message for {symbol} (Level: {level})...")
-                    # Always call send_telegram_message, let it handle dry_run internally
-                    if send_telegram_message(alert_message, include_restrict_button=True, dry_run=dry_run):
-                        # Update the timestamp for this alert and save the state ONLY if actually sent (not dry_run)
-                        if not dry_run:
-                            time.sleep(1)
-                            last_alert_timestamps[(symbol, level)] = {
-                                'timestamp': datetime.datetime.now(),
-                                'volume': curr_volume
-                            }
-                            print(f"[{datetime.datetime.now()}] DEBUG: Alert sent and timestamp updated for {symbol} (Level: {level}).")
-                            save_alert_state(last_alert_timestamps)
-                    
+                    else: # Only proceed if it's NOT a duplicate
+                        if get_setting("volume_alerts_enabled", "True") == "False":
+                            print(f"[{datetime.datetime.now()}] Skipping Telegram message for {symbol} - Alerts are DISABLED in settings.")
+                            continue
+
+                        alert_message = create_alert_message(alert_detail, last_2h_volume, last_4h_volume, last_completed_hour_volume, open_price, close_price, symbol)
+
+                        print(f"[{datetime.datetime.now()}] Sending Telegram message for {symbol} (Level: {level})...")
+                        # Always call send_telegram_message, let it handle dry_run internally
+                        if send_telegram_message(alert_message, include_restrict_button=True, dry_run=dry_run):
+                            # Update the timestamp for this alert and save the state ONLY if actually sent (not dry_run)
+                            if not dry_run:
+                                time.sleep(1)
+                                last_alert_timestamps[(symbol, level)] = {
+                                    'timestamp': datetime.datetime.now(),
+                                    'volume': curr_volume
+                                }
+                                print(f"[{datetime.datetime.now()}] DEBUG: Alert sent and timestamp updated for {symbol} (Level: {level}).")
+                                save_alert_state(last_alert_timestamps)
 
         except requests.exceptions.RequestException as e:
             print(f"[{datetime.datetime.now()}] Error fetching data for {symbol}: {e}")

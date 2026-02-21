@@ -5,6 +5,8 @@ import requests
 import pandas as pd
 from datetime import datetime
 
+from .binance_permissions_service import permissions_service
+
 
 def fetch_klines(symbol, interval='1h', limit=100):
     """
@@ -96,6 +98,14 @@ def get_current_price(symbol):
 
 
 def validate_trading_pair(symbol):
+    permission_result = permissions_service.can_trade_symbol(symbol)
+    if permission_result is not None:
+        return permission_result
+
+    return _validate_symbol_with_ticker(symbol)
+
+
+def _validate_symbol_with_ticker(symbol):
     url = f'https://api.binance.com/api/v3/ticker/price?symbol={symbol}'
 
     try:
@@ -104,10 +114,10 @@ def validate_trading_pair(symbol):
             return False, "invalid_symbol"
         response.raise_for_status()
         return True, None
-    except requests.exceptions.RequestException as e:
-        if hasattr(e, 'response') and e.response is not None and e.response.status_code == 400:
+    except requests.exceptions.RequestException as exc:
+        if hasattr(exc, 'response') and exc.response is not None and exc.response.status_code == 400:
             return False, "invalid_symbol"
-        return False, str(e)
+        return False, str(exc)
 
 
 def get_top_volume_pairs(limit=20, quote_asset='USDC'):
