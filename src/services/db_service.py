@@ -235,12 +235,15 @@ def get_performance_stats(symbol=None, start_date=None, end_date=None):
     }
 
 
-def get_suggestions_between_dates(limit=10, start_date=None, end_date=None):
+def get_suggestions_between_dates(limit=10, start_date=None, end_date=None, completed_only=False):
     conn = get_connection()
     cursor = conn.cursor()
 
     filters = ['1=1']
     params = []
+
+    if completed_only:
+        filters.append("status IN ('WIN', 'LOSS')")
 
     if start_date:
         filters.append('datetime(created_at) >= datetime(?)')

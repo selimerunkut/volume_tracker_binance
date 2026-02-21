@@ -80,7 +80,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/help - Show this help message\n"
         "/list_restricted - List all restricted trading pairs\n"
         "/unrestrict <SYMBOL> - Unrestrict a specific trading pair\n"
-        "/analyze <SYMBOL> - Get AI strategy (aliases: /a, /anlayze)\n"
+        "/analyze <SYMBOL> - Get AI strategy (alias: /a)\n"
         "/history - Show trading performance stats\n"
     )
     markup = await get_main_menu_markup()
@@ -165,10 +165,6 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     symbol = context.args[0].upper()
     logger.info(f"DEBUG: Processing analysis for symbol: {symbol}")
     
-    typo_note = ""
-    if update.message and update.message.text and "/anlayze" in update.message.text.lower():
-        typo_note = "\n\n<i>(I noticed a typo, but I'll analyze that for you anyway! 😉)</i>"
-
     status_msg = await update.effective_message.reply_text(f"🔍 Analyzing {symbol}... This may take a moment.")
 
     try:
@@ -202,7 +198,6 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
         
         response += f"<b>Reasoning</b>: {reasoning}"
-        response += typo_note
         
         reply_markup = None
         if strategy.get('suggestion_id'):
@@ -278,7 +273,7 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     msg = (
         f"📊 **Performance History ({range_text})**\n\n"
-        f"Total Analysis: {stats['total_trades']}\n"
+        f"Simulated Trades: {stats['total_trades']}\n"
         f"Wins: {stats['wins']}\n"
         f"Losses: {stats['losses']}\n"
         f"Win Rate: {stats['win_rate']:.1f}%\n"
@@ -286,7 +281,7 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
     keyboard = [
-        [InlineKeyboardButton("📜 View History Details", callback_data=f"history_details|{start_iso}|{end_iso}")]
+        [InlineKeyboardButton("📜 View Simulated Trade Details", callback_data=f"history_details|{start_iso}|{end_iso}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -323,7 +318,8 @@ async def history_details_callback(update: Update, context: ContextTypes.DEFAULT
         get_suggestions_between_dates,
         limit=10,
         start_date=start_token or None,
-        end_date=end_token or None
+        end_date=end_token or None,
+        completed_only=True
     )
 
     if not results:
@@ -333,12 +329,15 @@ async def history_details_callback(update: Update, context: ContextTypes.DEFAULT
         )
         return
 
-    lines = ["📜 **Last 10 Analyses**"]
+    lines = ["📜 **Last 10 Completed Simulated Trades**"]
     for row in results:
         ts = row['created_at'][:19]
-        act = row['strategy_type']
+        status = row['status']
+        pnl = row['pnl_percent']
         symbol = row['symbol']
-        lines.append(f"{ts} — {symbol} ({act})")
+        act = row['strategy_type']
+        pnl_str = f"+{pnl:.2f}%" if pnl and pnl > 0 else f"{pnl:.2f}%" if pnl else "N/A"
+        lines.append(f"{ts} — {symbol} ({act}) {status} [{pnl_str}]")
 
     await context.bot.send_message(
         chat_id=query.message.chat_id,
@@ -388,7 +387,6 @@ def main() -> None:
     application.add_handler(CommandHandler("list_restricted", list_restricted))
     application.add_handler(CommandHandler("unrestrict", unrestrict_pair))
     application.add_handler(CommandHandler("analyze", analyze_symbol))
-    application.add_handler(CommandHandler("anlayze", analyze_symbol)) # Alias for common typo
     application.add_handler(CommandHandler("a", analyze_symbol)) # Shorthand
     application.add_handler(CommandHandler("history", show_history))
     
