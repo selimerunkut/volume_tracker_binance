@@ -124,16 +124,6 @@ def update_outcome(suggestion_id, status, pnl_percent=None):
 
 
 def get_trade_history(symbol=None, limit=10):
-    """
-    Get trade history.
-    
-    Args:
-        symbol: Filter by symbol (optional)
-        limit: Maximum number of records
-    
-    Returns:
-        list: Trade records
-    """
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -175,37 +165,36 @@ def get_recent_failures(limit=5):
     return [dict(row) for row in rows]
 
 
-def get_performance_stats(symbol=None):
-    """
-    Get win/loss statistics.
-    
-    Returns:
-        dict: Statistics including win_rate, total_trades, etc.
-    """
+def get_performance_stats(symbol=None, start_date=None, end_date=None):
     conn = get_connection()
     cursor = conn.cursor()
     
+    filters = ["status IN ('WIN', 'LOSS')"]
+    params = []
+
     if symbol:
-        cursor.execute('''
-            SELECT 
-                COUNT(*) as total,
-                SUM(CASE WHEN status = 'WIN' THEN 1 ELSE 0 END) as wins,
-                SUM(CASE WHEN status = 'LOSS' THEN 1 ELSE 0 END) as losses,
-                AVG(CASE WHEN pnl_percent IS NOT NULL THEN pnl_percent END) as avg_pnl
-            FROM suggestions 
-            WHERE symbol = ? AND status IN ('WIN', 'LOSS')
-        ''', (symbol.upper(),))
-    else:
-        cursor.execute('''
-            SELECT 
-                COUNT(*) as total,
-                SUM(CASE WHEN status = 'WIN' THEN 1 ELSE 0 END) as wins,
-                SUM(CASE WHEN status = 'LOSS' THEN 1 ELSE 0 END) as losses,
-                AVG(CASE WHEN pnl_percent IS NOT NULL THEN pnl_percent END) as avg_pnl
-            FROM suggestions 
-            WHERE status IN ('WIN', 'LOSS')
-        ''')
-    
+        filters.append('symbol = ?')
+        params.append(symbol.upper())
+
+    if start_date:
+        filters.append('datetime(created_at) >= datetime(?)')
+        params.append(start_date)
+    if end_date:
+        filters.append('datetime(created_at) <= datetime(?)')
+        params.append(end_date)
+
+    where_clause = ' AND '.join(filters)
+    query = f'''
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'WIN' THEN 1 ELSE 0 END) as wins,
+            SUM(CASE WHEN status = 'LOSS' THEN 1 ELSE 0 END) as losses,
+            AVG(CASE WHEN pnl_percent IS NOT NULL THEN pnl_percent END) as avg_pnl
+        FROM suggestions
+        WHERE {where_clause}
+    '''
+
+    cursor.execute(query, tuple(params))
     row = cursor.fetchone()
     conn.close()
     
@@ -223,6 +212,45 @@ def get_performance_stats(symbol=None):
         'win_rate': win_rate,
         'avg_pnl': avg_pnl
     }
+
+
+def get_suggestions_between_dates(limit=10, start_date=None, end_date=None):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    filters = ['1=1']
+    params = []
+
+    if start_date:
+        filters.append('datetime(created_at) >= datetime(?)')
+        params.append(start_date)
+    if end_date:
+        filters.append('datetime(created_at) <= datetime(?)')
+        params.append(end_date)
+
+    where_clause = ' AND '.join(filters)
+    query = f'''
+        SELECT * FROM suggestions
+        WHERE {where_clause}
+        ORDER BY created_at DESC
+        LIMIT ?
+    '''
+
+    params.append(limit)
+    cursor.execute(query, tuple(params))
+    rows = cursor.fetchall()
+    conn.close()
+
+    result = []
+    for row in rows:
+        data = dict(row)
+        if data.get('analysis_data'):
+            try:
+                data['analysis_data'] = json.loads(data['analysis_data'])
+            except json.JSONDecodeError:
+                data['analysis_data'] = {}
+        result.append(data)
+    return result
 
 
 def get_suggestion_details(suggestion_id):

@@ -1,15 +1,21 @@
 import os
 import json
 import asyncio
+import html
+import logging
+from datetime import datetime, time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.error import TelegramError
 from symbol_manager import SymbolManager
-from datetime import datetime
 
 # Import services
 from src.services.llm_strategy import analyze_and_suggest
 from src.services.performance_tracker import track_performance
 from src.services.db_service import get_performance_stats, init_db, get_suggestion_details
+from src.services.db_service import get_suggestions_between_dates
+
+logger = logging.getLogger(__name__)
 
 # Load Telegram bot token and chat ID from credentials_b.json
 def load_telegram_credentials():
@@ -87,7 +93,7 @@ async def restrict_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Analyzes a symbol using AI strategy."""
     if not context.args:
-        await update.message.reply_text("Usage: /analyze <SYMBOL> (e.g., /analyze BTCUSDC)")
+        await update.message.reply_text("Usage: /analyze &lt;SYMBOL&gt; (e.g., /analyze BTCUSDC)")
         return
 
     symbol = context.args[0].upper()
@@ -102,24 +108,28 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
 
         if "error" in strategy:
-            await status_msg.edit_text(f"❌ Error: {strategy['error']}")
+            await status_msg.edit_text(f"❌ Error: {html.escape(str(strategy['error']))}")
             return
 
-        # Format the response
+        # Format the response using HTML (safer than Markdown v1 for LLM-generated text)
+        action = html.escape(str(strategy.get('action', 'N/A')))
+        confidence = strategy.get('confidence', 0)
+        reasoning = html.escape(str(strategy.get('reasoning', 'N/A')))
+
         response = (
-            f"🤖 **Strategy for {symbol}**\n\n"
-            f"**Action**: {strategy.get('action', 'N/A')} "
-            f"(Confidence: {strategy.get('confidence', 0)}%)\n"
+            f"🤖 <b>Strategy for {symbol}</b>\n\n"
+            f"<b>Action</b>: {action} "
+            f"(Confidence: {confidence}%)\n"
         )
         
         if strategy.get('action') in ['LONG', 'SHORT']:
             response += (
-                f"**Entry**: {strategy.get('entry')}\n"
-                f"**TP**: {strategy.get('tp')}\n"
-                f"**SL**: {strategy.get('sl')}\n\n"
+                f"<b>Entry</b>: {strategy.get('entry')}\n"
+                f"<b>TP</b>: {strategy.get('tp')}\n"
+                f"<b>SL</b>: {strategy.get('sl')}\n\n"
             )
         
-        response += f"**Reasoning**: {strategy.get('reasoning')}"
+        response += f"<b>Reasoning</b>: {reasoning}"
         
         reply_markup = None
         if strategy.get('suggestion_id'):
@@ -128,10 +138,14 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await status_msg.edit_text(response, parse_mode='Markdown', reply_markup=reply_markup)
+        await status_msg.edit_text(response, parse_mode='HTML', reply_markup=reply_markup)
 
     except Exception as e:
-        await status_msg.edit_text(f"❌ An unexpected error occurred: {str(e)}")
+        logger.error(f"Unexpected error in analyze_symbol: {e}")
+        try:
+            await status_msg.edit_text(f"❌ An unexpected error occurred: {html.escape(str(e))}")
+        except TelegramError:
+            pass
 
 async def details_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles callback queries to show analysis details."""
@@ -147,40 +161,134 @@ async def details_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     data = details['analysis_data']
     
-    message = f"📜 **Analysis Details for {details['symbol']}**\n\n"
-    message += f"**Technical Indicators**:\n{data.get('ta_summary', 'N/A')}\n"
-    message += f"**News Context**:\n{data.get('news_summary', 'N/A')}\n"
+    message = f"📜 <b>Analysis Details for {details['symbol']}</b>\n\n"
+    message += f"<b>Technical Indicators</b>:\n{html.escape(data.get('ta_summary', 'N/A'))}\n"
+    message += f"<b>News Context</b>:\n{html.escape(data.get('news_summary', 'N/A'))}\n"
     
     if data.get('memory_section') and "No past trades" not in data['memory_section']:
-        message += f"**Past Performance Context**:\n{data['memory_section']}\n"
+        message += f"<b>Past Performance Context</b>:\n{html.escape(data['memory_section'])}\n"
         
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text=message,
-        parse_mode='Markdown'
+        parse_mode='HTML'
     )
 
 async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Shows performance statistics."""
-    stats = await asyncio.to_thread(get_performance_stats)
-    
+    start_range = None
+    end_range = None
+    range_text = "All time"
+    args = context.args
+
+    if args:
+        try:
+            start_range = parse_date_arg(args[0])
+            if len(args) > 1:
+                end_range = parse_date_arg(args[1])
+            else:
+                end_range = start_range
+        except ValueError as err:
+            await update.message.reply_text(str(err))
+            return
+
+        range_text = f"{start_range.strftime('%Y-%m-%d')} to {end_range.strftime('%Y-%m-%d')}"
+
+    start_iso = get_day_start_iso(start_range) if start_range else ''
+    end_iso = get_day_end_iso(end_range) if end_range else ''
+
+    stats = await asyncio.to_thread(
+        get_performance_stats,
+        start_date=start_iso or None,
+        end_date=end_iso or None
+    )
+
     msg = (
-        "📊 **Performance History**\n\n"
-        f"Total Trades: {stats['total_trades']}\n"
+        f"📊 **Performance History ({range_text})**\n\n"
+        f"Total Analysis: {stats['total_trades']}\n"
         f"Wins: {stats['wins']}\n"
         f"Losses: {stats['losses']}\n"
         f"Win Rate: {stats['win_rate']:.1f}%\n"
         f"Avg PnL: {stats['avg_pnl']:.2f}%"
     )
-    await update.message.reply_text(msg, parse_mode='Markdown')
+
+    keyboard = [
+        [InlineKeyboardButton("📜 View History Details", callback_data=f"history_details|{start_iso}|{end_iso}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=reply_markup)
+
+
+def parse_date_arg(date_text: str) -> datetime:
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(date_text, fmt)
+        except ValueError:
+            continue
+    raise ValueError("Please provide dates in YYYY-MM-DD or YYYY/MM/DD format.")
+
+
+def get_day_start_iso(dt: datetime) -> str:
+    return datetime.combine(dt.date(), time.min).isoformat()
+
+
+def get_day_end_iso(dt: datetime) -> str:
+    return datetime.combine(dt.date(), time.max).isoformat()
+
+
+async def history_details_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    payload = query.data.split("|")
+    _, start_token, end_token = payload if len(payload) == 3 else (payload[0], '', '')
+    start_dt = datetime.fromisoformat(start_token) if start_token else None
+    end_dt = datetime.fromisoformat(end_token) if end_token else None
+
+    results = await asyncio.to_thread(
+        get_suggestions_between_dates,
+        limit=10,
+        start_date=start_token or None,
+        end_date=end_token or None
+    )
+
+    if not results:
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="No analysis records found for the selected range."
+        )
+        return
+
+    lines = ["📜 **Last 10 Analyses**"]
+    for row in results:
+        ts = row['created_at'][:19]
+        act = row['strategy_type']
+        symbol = row['symbol']
+        lines.append(f"{ts} — {symbol} ({act})")
+
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="\n".join(lines),
+        parse_mode='Markdown'
+    )
 
 async def run_tracker(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Background job to track trade performance."""
     print(f"[{datetime.now()}] Running background performance tracker...")
     await asyncio.to_thread(track_performance)
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log errors and Telegram API conflicts."""
+    logger.error(f"Bot error: {context.error}", exc_info=context.error)
+
 def main() -> None:
     """Start the bot."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[%(asctime)s] %(levelname)s %(name)s: %(message)s'
+    )
+
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Register handlers
@@ -193,6 +301,10 @@ def main() -> None:
     
     application.add_handler(CallbackQueryHandler(restrict_callback, pattern="^restrict_"))
     application.add_handler(CallbackQueryHandler(details_callback, pattern="^details_"))
+    application.add_handler(CallbackQueryHandler(history_details_callback, pattern="^history_details"))
+
+    # Register error handler
+    application.add_error_handler(error_handler)
 
     # Add background job (run every 30 minutes)
     job_queue = application.job_queue
