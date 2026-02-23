@@ -2,7 +2,7 @@ import asyncio
 import logging
 from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from .market_data_service import fetch_klines
+from .market_data_service import fetch_klines, get_current_price
 from .technical_analysis import calculate_indicators
 from .strategy_signals import (
     evaluate_hourly_strategy,
@@ -11,8 +11,10 @@ from .strategy_signals import (
     describe_daily_signal,
 )
 from .watchlist_manager import WatchlistManager
+from .db_service import save_signal_trade, get_last_signal_trade
 
 logger = logging.getLogger(__name__)
+SIGNAL_COOLDOWN_SECONDS = 3600
 
 class SignalService:
     def __init__(self, bot_context=None, chat_id=None, watchlist_manager=None):
@@ -41,8 +43,22 @@ class SignalService:
                 else:
                     signal = evaluate_daily_strategy(df)
                     explanation = describe_daily_signal(df, signal)
-                
+
                 if signal != 'WAIT':
+                    now = datetime.now()
+                    last_signal = get_last_signal_trade(symbol, timeframe, signal)
+                    if last_signal:
+                        prev_entry = datetime.fromisoformat(last_signal['entry_ts'])
+                        if (now - prev_entry).total_seconds() < SIGNAL_COOLDOWN_SECONDS:
+                            logger.info(f"Skipping duplicate {signal} signal for {symbol} {timeframe} (cooldown)")
+                            continue
+                    entry_price = await asyncio.to_thread(get_current_price, symbol)
+                    if entry_price is None:
+                        logger.warning(f"Cannot persist {signal} signal for {symbol}: entry price unavailable")
+                    else:
+                        signal_type = 'hourly' if timeframe == '1h' else 'daily'
+                        dedup_key = f"{symbol}_{timeframe}_{signal}"
+                        save_signal_trade(symbol, timeframe, signal_type, signal, entry_price, explanation, dedup_key)
                     last_key = (symbol, timeframe)
                     if self.last_signals.get(last_key) != signal:
                         self.last_signals[last_key] = signal

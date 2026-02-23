@@ -39,6 +39,28 @@ def init_db():
         )
     ''')
 
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS signal_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            signal_type TEXT NOT NULL,
+            action TEXT NOT NULL,
+            entry_price REAL NOT NULL,
+            entry_ts TEXT NOT NULL,
+            explanation TEXT,
+            dedup_key TEXT,
+            status TEXT DEFAULT 'PENDING',
+            pnl_percent REAL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_signal_trades_symbol_timeframe_action
+        ON signal_trades (symbol, timeframe, action)
+    ''')
+
     try:
         cursor.execute("ALTER TABLE suggestions ADD COLUMN analysis_data TEXT")
     except sqlite3.OperationalError:
@@ -127,6 +149,87 @@ def save_suggestion(symbol, strategy_type, entry_price, take_profit, stop_loss, 
     
     print(f"[{datetime.now()}] Saved suggestion #{suggestion_id} for {symbol}")
     return suggestion_id
+
+
+def save_signal_trade(symbol, timeframe, signal_type, action, entry_price, explanation=None, dedup_key=None, entry_ts=None):
+    """Insert a new signal trade record."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    entry_ts_val = entry_ts or datetime.now().isoformat()
+
+    cursor.execute('''
+        INSERT INTO signal_trades
+        (symbol, timeframe, signal_type, action, entry_price, entry_ts, explanation, dedup_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        symbol.upper(),
+        timeframe,
+        signal_type,
+        action.upper(),
+        entry_price,
+        entry_ts_val,
+        explanation,
+        dedup_key
+    ))
+
+    signal_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+
+    print(f"[{datetime.now()}] Saved signal trade #{signal_id} ({signal_type} {symbol} {action}).")
+    return signal_id
+
+
+def get_last_signal_trade(symbol, timeframe, action):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT * FROM signal_trades
+        WHERE symbol = ? AND timeframe = ? AND action = ?
+        ORDER BY entry_ts DESC
+        LIMIT 1
+    ''', (symbol.upper(), timeframe, action.upper()))
+
+    row = cursor.fetchone()
+    conn.close()
+
+    if row:
+        return dict(row)
+    return None
+
+
+def get_pending_signal_trades():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT * FROM signal_trades
+        WHERE status = 'PENDING'
+        ORDER BY created_at ASC
+    ''')
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [dict(row) for row in rows]
+
+
+def update_signal_trade_outcome(signal_id, status, pnl_percent=None):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        UPDATE signal_trades
+        SET status = ?, pnl_percent = ?
+        WHERE id = ?
+    ''', (status, pnl_percent, signal_id))
+
+    conn.commit()
+    conn.close()
+
+    print(f"[{datetime.now()}] Updated signal trade #{signal_id} to {status} (PnL: {pnl_percent}%).")
 
 
 def get_pending_suggestions():

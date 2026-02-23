@@ -2,7 +2,13 @@
 Performance Tracker - Evaluates trade outcomes and updates database
 """
 from datetime import datetime, timedelta
-from .db_service import get_pending_suggestions, update_outcome, init_db
+from .db_service import (
+    get_pending_suggestions,
+    update_outcome,
+    init_db,
+    get_pending_signal_trades,
+    update_signal_trade_outcome,
+)
 from .market_data_service import get_current_price
 
 
@@ -98,12 +104,36 @@ def evaluate_trade(suggestion, current_price):
     return 'PENDING', None
 
 
+def evaluate_signal_trade(signal, current_price):
+    if current_price is None:
+        return 'PENDING', None
+
+    entry_ts = datetime.fromisoformat(signal['entry_ts']) if signal.get('entry_ts') else datetime.now()
+    elapsed = datetime.now() - entry_ts
+
+    if elapsed < timedelta(hours=WAIT_WINDOW_HOURS):
+        return 'PENDING', None
+
+    action = signal['action'].upper()
+    entry = signal['entry_price']
+    pnl = calculate_pnl(entry, current_price, action)
+
+    threshold = WAIT_MOVE_THRESHOLD_PERCENT
+
+    if pnl >= threshold:
+        return 'WIN', pnl
+    if pnl <= -threshold:
+        return 'LOSS', pnl
+
+    return 'EXPIRED', pnl
+
+
 def track_performance():
     """
     Main function to track and update all pending trades.
     """
     print(f"[{datetime.now()}] Starting performance tracking...")
-    
+
     # Get pending suggestions
     pending = get_pending_suggestions()
     
@@ -139,6 +169,32 @@ def track_performance():
             continue
     
     print(f"[{datetime.now()}] Performance tracking complete. Updated {updated_count} trades")
+
+    pending_signals = get_pending_signal_trades()
+    if not pending_signals:
+        print(f"[{datetime.now()}] No pending signal trades to evaluate")
+        return
+
+    print(f"[{datetime.now()}] Found {len(pending_signals)} pending signal trades")
+    signal_updates = 0
+
+    for signal in pending_signals:
+        symbol = signal['symbol']
+        signal_id = signal['id']
+        try:
+            current_price = get_current_price(symbol)
+            status, pnl = evaluate_signal_trade(signal, current_price)
+            if status != 'PENDING':
+                update_signal_trade_outcome(signal_id, status, pnl)
+                signal_updates += 1
+                print(f"[{datetime.now()}] Signal #{signal_id} ({symbol}): {status} (PnL: {pnl}%)")
+            else:
+                print(f"[{datetime.now()}] Signal #{signal_id} ({symbol}): Still pending")
+        except Exception as e:
+            print(f"[{datetime.now()}] Error evaluating signal #{signal_id} ({symbol}): {e}")
+            continue
+
+    print(f"[{datetime.now()}] Signal tracking complete. Updated {signal_updates} signal trades")
 
 
 if __name__ == "__main__":
