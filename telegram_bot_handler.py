@@ -5,7 +5,6 @@ import html
 import logging
 import inspect
 from datetime import datetime, time
-import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.error import BadRequest, TelegramError
@@ -137,10 +136,6 @@ def get_scope_summary(selection):
     if len(normalized['exchanges']) == 1:
         return f"🎯 Current scope: single exchange ({normalized['exchanges'][0].upper()})"
     return f"🗂 Current scope: multiple exchanges ({format_exchange_names(normalized['exchanges'])})"
-
-
-def get_alert_scope_summary(selection):
-    return get_scope_summary(selection)
 
 
 def _flow_prompt_copy(action: str):
@@ -275,12 +270,6 @@ async def complete_scoped_flow(update: Update, context: ContextTypes.DEFAULT_TYP
         await watch_pair(update, context, symbol=symbol, exchange_scope=scope)
     elif action == 'unwatch':
         await unwatch_pair(update, context, symbol=symbol, exchange_scope=scope)
-
-
-async def execute_scoped_action(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str) -> None:
-    await complete_scoped_flow(update, context, action)
-
-
 
 def format_exchange_names(exchange_names):
     return ", ".join(name.upper() for name in exchange_names)
@@ -627,22 +616,6 @@ async def run_signals_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         notifications.append(f"{tf} done")
 
     await update.effective_message.reply_text("Signal checks completed: " + ", ".join(notifications))
-
-
-async def prompt_watch_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    set_pending_prompt(context, 'watch')
-    await update.effective_message.reply_text(
-        "Please reply with the trading pair symbol (e.g., BTCUSDC) to add it to the watchlist.",
-        reply_markup=ForceReply(selective=True)
-    )
-
-
-async def prompt_unwatch_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    set_pending_prompt(context, 'unwatch')
-    await update.effective_message.reply_text(
-        "Please reply with the trading pair symbol (e.g., BTCUSDC) to remove it from the watchlist.",
-        reply_markup=ForceReply(selective=True)
-    )
 
 async def restrict_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles callback queries from inline buttons to restrict a pair."""
