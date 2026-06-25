@@ -3,11 +3,16 @@ import json
 import sys # Import sys to access command-line arguments
 from symbol_manager import SymbolManager
 import pandas as pd
-from binance.client import Client
 import datetime
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from alert_levels_tg import get_volume_alert_details
 from telegram_alerts import send_telegram_message
+from telegram_alerts import TELEGRAM_CHAT_ID
+from src.exchanges.registry import get_exchanges_for_scope
+from src.services.alert_preferences import get_alert_exchange_selection
+from src.services.volume_alerts import build_volume_alert_message
 from src.services.binance_permissions_service import permissions_service
 from src.services.db_service import get_setting
 
@@ -27,8 +32,12 @@ def load_alert_state():
             # Convert string timestamps back to datetime objects
             loaded_timestamps = {}
             for key_str, alert_data in state.items():
-                symbol, level = key_str.split('___')
-                loaded_timestamps[(symbol, level)] = {
+                try:
+                    exchange_name, symbol, level = key_str.split('___')
+                except ValueError:
+                    print(f"[{datetime.datetime.now()}] Skipping legacy or malformed alert state key: {key_str}")
+                    continue
+                loaded_timestamps[(exchange_name, symbol, level)] = {
                     'timestamp': datetime.datetime.fromisoformat(alert_data['timestamp']),
                     'volume': float(alert_data['volume'])
                 }
@@ -66,11 +75,11 @@ def save_alert_state(timestamps):
     try:
         # Convert datetime objects to string timestamps for JSON serialization
         serializable_timestamps = {
-            f"{symbol}___{level}": {
+            f"{exchange_name}___{symbol}___{level}": {
                 'timestamp': data['timestamp'].isoformat(),
                 'volume': data['volume']
             }
-            for (symbol, level), data in timestamps.items()
+            for (exchange_name, symbol, level), data in timestamps.items()
         }
         with open(STATE_FILE, 'w') as f:
             json.dump(serializable_timestamps, f, indent=4)
@@ -79,51 +88,177 @@ def save_alert_state(timestamps):
         print(f"[{datetime.datetime.now()}] Error saving alert state: {e}")
 
 
-def generate_tradingview_url(symbol):
-    # TradingView URL format
-    return f"https://www.tradingview.com/symbols/{symbol}/?exchange=BINANCE"
+def get_scan_quote_assets(exchange_name):
+    exchange_name = (exchange_name or '').lower()
+    if exchange_name == 'kraken':
+        return ['USD', 'BTC']
+    return ['USDC', 'BTC']
 
-def generate_binance_trade_url(symbol):
-    # Binance trade URL format
-    # Example: https://www.binance.com/en/trade/AUCTION_USDC
-    # The symbol from the client.get_exchange_info() is already in the correct format (e.g., "AUCTIONUSDC")
-    # We need to insert an underscore before the quote asset (USDC)
-    if symbol.endswith('USDC'):
-        base_asset = symbol[:-4]
-        return f"https://www.binance.com/en/trade/{base_asset}_USDC"
-    elif symbol.endswith('BTC'):
-        base_asset = symbol[:-3]
-        return f"https://www.binance.com/en/trade/{base_asset}_BTC"
-    return f"https://www.binance.com/en/trade/{symbol}"
 
-def create_alert_message(alert_detail, last_2h_volume, last_4h_volume, last_completed_hour_volume, open_price, close_price, symbol):
+def get_filtered_symbols(exchange, quote_asset, excluded_symbols):
+    """
+    Fetches exchange symbols through the adapter and filters by quote asset,
+    excluding leveraged tokens and restricted symbols.
+    """
+    pairs = exchange.list_symbols(quote_asset=quote_asset)
+    filtered_pairs = [
+        item.symbol for item in pairs
+        if item.symbol not in excluded_symbols
+        and 'UP' not in item.symbol
+        and 'DOWN' not in item.symbol
+        and 'BEAR' not in item.symbol
+        and 'BULL' not in item.symbol
+    ]
+    return filtered_pairs
+
+
+def create_alert_message(
+    alert_detail,
+    last_2h_volume,
+    last_4h_volume,
+    last_completed_hour_volume,
+    open_price,
+    close_price,
+    symbol,
+    exchange,
+):
    """
    Constructs the alert message dictionary.
    """
-   tradingview_url = generate_tradingview_url(symbol)
-   binance_trade_url = generate_binance_trade_url(symbol)
+   return build_volume_alert_message(
+       alert_detail,
+       last_2h_volume,
+       last_4h_volume,
+       last_completed_hour_volume,
+       open_price,
+       close_price,
+       symbol,
+        exchange=exchange.display_name,
+        chart_url=exchange.tradingview_url(symbol),
+        trade_url=exchange.trade_url(symbol),
+    )
 
-   return {
-       'exchange': 'BINANCE',
-       'symbol': symbol,
-       'curr_volume': alert_detail['curr_volume'],
-       'prev_volume_mean': alert_detail['prev_volume_mean'],
-       'level': alert_detail['level'],
-       'last_2h_volume': last_2h_volume,
-       'last_4h_volume': last_4h_volume,
-       'last_1h_volume': last_completed_hour_volume, # Add last 1h volume
-       'open_price': f"{open_price:.8f}", # Format as string with high precision
-       'close_price': f"{close_price:.8f}", # Format as string with high precision
-       'chart_url': tradingview_url,
-       'binance_trade_url': binance_trade_url
-   }
+def scan_exchange(exchange, symbol_manager, excluded_symbols, dry_run, alerts_enabled, telegram_send_lock):
+    print(f"[{datetime.datetime.now()}] Starting scan on {exchange.display_name}...")
 
-def is_duplicate_alert(symbol, level, curr_volume):
+    allowed_symbols = permissions_service.get_allowed_symbols() if exchange.name == 'binance' else None
+    if allowed_symbols is True:
+        allowed_symbols = None
+
+    quote_assets = get_scan_quote_assets(exchange.name)
+    exchange_pairs = []
+    for quote_asset in quote_assets:
+        fetched_pairs = get_filtered_symbols(exchange, quote_asset, excluded_symbols)
+        exchange_pairs.extend(fetched_pairs)
+        print(f"[{datetime.datetime.now()}] Fetched {len(fetched_pairs)} {quote_asset} pairs from {exchange.display_name}.")
+
+    if exchange.name == 'binance' and allowed_symbols:
+        trading_group_label = permissions_service.trading_group or 'your trading group'
+        filtered_pairs = [s for s in exchange_pairs if s in allowed_symbols]
+        print(f"[{datetime.datetime.now()}] {len(filtered_pairs)} of {len(exchange_pairs)} pairs match trading group {trading_group_label}.")
+        exchange_pairs = filtered_pairs
+    elif exchange.name == 'binance' and allowed_symbols is None:
+        print(f"[{datetime.datetime.now()}] Unable to retrieve trading-group permissions; volume alerts will consider all fetched pairs.")
+    elif exchange.name == 'binance' and not allowed_symbols:
+        print(f"[{datetime.datetime.now()}] No tradable pairs returned for {permissions_service.trading_group or 'the trading group'}; skipping permission filtering.")
+
+    print(f"[{datetime.datetime.now()}] Scanning {len(exchange_pairs)} pairs on {exchange.display_name}.")
+
+    sent_alerts = []
+    for symbol in exchange_pairs:
+        interval = '1h'
+        limit = 10 # Fetch enough data for current volume and a 6-hour mean (last 7 candles)
+                   # A limit of 10 for '1h' interval means it fetches the last 10 hours of data.
+        print(f"[{datetime.datetime.now()}] Fetching data for {symbol} on {exchange.display_name}...")
+        try:
+            df = exchange.fetch_klines(symbol, interval=interval, limit=limit)
+            if df.empty:
+                continue
+            if len(df) <= 2:
+                continue
+
+            # Current volume is the volume of the currently forming candle
+            curr_volume = df['volume'].iloc[-1]
+            # Volume of the last completed hour
+            last_completed_hour_volume = df['volume'].iloc[-2]
+            # Calculate the mean of the 6 hours before the last completed hour
+            # This means taking candles from index -8 up to (but not including) -2
+            prev_volume_mean = df['volume'].iloc[-8:-2].mean()
+
+            # Calculate last 2-hour and 4-hour volumes
+            # Ensure there are enough data points for these calculations
+            last_2h_volume = df['volume'].iloc[-3:-1].sum() if len(df) >= 3 else 0
+            last_4h_volume = df['volume'].iloc[-5:-1].sum() if len(df) >= 5 else 0
+
+            print(f"[{datetime.datetime.now()}] {symbol}: Current Volume = {curr_volume}, Previous 6h Mean Volume = {prev_volume_mean}, Last 2h Volume = {last_2h_volume}, Last 4h Volume = {last_4h_volume}")
+
+            open_price = df['open'].iloc[-1]
+            close_price = df['close'].iloc[-1]
+            alert_details_list = get_volume_alert_details(
+                curr_volume,
+                prev_volume_mean,
+                last_completed_hour_volume,
+                open_price,
+                close_price,
+                symbol,
+                '1h',
+                exchange.display_name,
+            )
+
+            if alert_details_list:
+                print(f"[{datetime.datetime.now()}] Alerts generated for {symbol}: {len(alert_details_list)}")
+            else:
+                print(f"[{datetime.datetime.now()}] No alerts for {symbol}.")
+            for alert_detail in alert_details_list:
+                symbol = alert_detail['symbol']
+                level = alert_detail['level']
+
+                # Check if the symbol is in the restricted list before proceeding
+                if symbol_manager.is_symbol_excluded(symbol):
+                    print(f"[{datetime.datetime.now()}] Skipping alert for restricted symbol: {symbol}")
+                    continue
+
+                if is_duplicate_alert(exchange.name, symbol, level, curr_volume):
+                    # The DEBUG print inside is_duplicate_alert is sufficient
+                    continue # Skip sending this alert
+
+                if not alerts_enabled:
+                    print(f"[{datetime.datetime.now()}] Skipping Telegram message for {symbol} - Alerts are DISABLED in settings.")
+                    continue
+
+                alert_message = create_alert_message(
+                    alert_detail,
+                    last_2h_volume,
+                    last_4h_volume,
+                    last_completed_hour_volume,
+                    open_price,
+                    close_price,
+                    symbol,
+                    exchange,
+                )
+
+                print(f"[{datetime.datetime.now()}] Sending Telegram message for {symbol} (Level: {level})...")
+                with telegram_send_lock:
+                    sent = send_telegram_message(alert_message, include_restrict_button=True, dry_run=dry_run)
+                    if sent and not dry_run:
+                        time.sleep(1)
+
+                if sent and not dry_run:
+                    sent_alerts.append((exchange.name, symbol, level, curr_volume))
+                    print(f"[{datetime.datetime.now()}] DEBUG: Alert sent for {exchange.display_name} {symbol} (Level: {level}).")
+        except ValueError as e:
+            print(f"[{datetime.datetime.now()}] Error processing data for {exchange.display_name} {symbol}: {e}")
+        except Exception as e:
+            print(f"[{datetime.datetime.now()}] An unexpected error occurred for {exchange.display_name} {symbol}: {e}")
+
+    return sent_alerts
+
+def is_duplicate_alert(exchange_name, symbol, level, curr_volume):
     """
     Checks if an alert for the given symbol and level was sent within the cooldown period,
     and if the current volume is not a significant new surge.
     """
-    key = (symbol, level)
+    key = (exchange_name, symbol, level)
     print(f"[{datetime.datetime.now()}] DEBUG: Checking for duplicate alert for key: {key}")
     if key in last_alert_timestamps:
         alert_data = last_alert_timestamps[key]
@@ -147,141 +282,57 @@ def is_duplicate_alert(symbol, level, curr_volume):
     print(f"[{datetime.datetime.now()}] DEBUG: No previous alert detected for {key}. Proceeding.")
     return False
 
-def get_filtered_symbols(client, quote_asset):
-    """
-    Fetches all symbols from Binance and filters them by quote asset,
-    excluding leveraged tokens.
-    """
-    symbols = client.get_exchange_info()['symbols']
-    filtered_pairs = [
-        s['symbol'] for s in symbols
-        if (s['quoteAsset'] == quote_asset)
-        and 'UP' not in s['symbol']
-        and 'DOWN' not in s['symbol']
-        and 'BEAR' not in s['symbol']
-        and 'BULL' not in s['symbol']
-    ]
-    return filtered_pairs
-
 def run_script(dry_run=False):
     # Load the persistent alert state at the beginning of the script run
     global last_alert_timestamps
     last_alert_timestamps = load_alert_state()
     print(f"[{datetime.datetime.now()}] Starting run_script...")
-    # Load Binance credentials
-    with open('credentials_b.json') as f:
-        credentials = json.load(f)
-    api_key = credentials['Binance_api_key']
-    api_secret = credentials['Binance_secret_key']
-    client = Client(api_key, api_secret)
-    
-    # Fetch symbols for analysis using the new helper function
     symbol_manager = SymbolManager()
     excluded_symbols = symbol_manager.get_excluded_symbols()
 
-    usdc_pairs = [s for s in get_filtered_symbols(client, 'USDC') if s not in excluded_symbols]
-    btc_pairs = [s for s in get_filtered_symbols(client, 'BTC') if s not in excluded_symbols]
-                   
-    all_pairs = usdc_pairs + btc_pairs
+    selection = get_alert_exchange_selection(TELEGRAM_CHAT_ID)
+    exchanges = get_exchanges_for_scope(selection)
+    print(f"[{datetime.datetime.now()}] Selected exchanges: {', '.join(exchange.display_name for exchange in exchanges)}")
+    alerts_enabled = get_setting("volume_alerts_enabled", "True") != "False"
+    telegram_send_lock = threading.Lock()
+    sent_alerts = []
 
-    allowed_symbols = permissions_service.get_allowed_symbols()
-    if allowed_symbols:
-        trading_group_label = permissions_service.trading_group or 'your trading group'
-        filtered_pairs = [s for s in all_pairs if s in allowed_symbols]
-        print(f"[{datetime.datetime.now()}] {len(filtered_pairs)} of {len(all_pairs)} pairs match trading group {trading_group_label}.")
-        all_pairs = filtered_pairs
-    elif allowed_symbols is None:
-        print(f"[{datetime.datetime.now()}] Unable to retrieve trading-group permissions; volume alerts will consider all fetched pairs.")
+    if len(exchanges) > 1:
+        with ThreadPoolExecutor(max_workers=len(exchanges)) as executor:
+            futures = [
+                executor.submit(
+                    scan_exchange,
+                    exchange,
+                    symbol_manager,
+                    excluded_symbols,
+                    dry_run,
+                    alerts_enabled,
+                    telegram_send_lock,
+                )
+                for exchange in exchanges
+            ]
+            for future in as_completed(futures):
+                sent_alerts.extend(future.result())
     else:
-        print(f"[{datetime.datetime.now()}] No tradable pairs returned for {permissions_service.trading_group or 'the trading group'}; skipping permission filtering.")
-    
-    print(f"[{datetime.datetime.now()}] Fetched {len(usdc_pairs)} USDC pairs and {len(btc_pairs)} BTC pairs. Total: {len(all_pairs)} pairs.")
-    
-    for symbol in all_pairs:
-        interval = '1h'
-        limit = 10 # Fetch enough data for current volume and a 6-hour mean (last 7 candles)
-                   # A limit of 10 for '1h' interval means it fetches the last 10 hours of data.
-        url = f'https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}'
-        print(f"[{datetime.datetime.now()}] Fetching data for {symbol}...")
-        try:
-            response = requests.get(url)
-            response.raise_for_status()
-            data = response.json()
-            #print(f"[{datetime.datetime.now()}] DEBUG: Type of klines data: {type(data)}")
-            #print(f"[{datetime.datetime.now()}] DEBUG: Klines data: {data}") # Uncomment for full data inspection if needed
-            df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close", "volume", "close_time", "quote_asset_volume", "number_of_trades", "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
-            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-            df["open"] = pd.to_numeric(df["open"])
-            df["close"] = pd.to_numeric(df["close"])
-            df["volume"] = pd.to_numeric(df["volume"])
-            
-            # Debugging: Print DataFrame head and dtypes to inspect data after conversion
-            # print(f"[{datetime.datetime.now()}] DEBUG: DataFrame head for {symbol}:\n{df.head()}")
-            # print(f"[{datetime.datetime.now()}] DEBUG: DataFrame dtypes for {symbol}:\n{df.dtypes}")
+        for exchange in exchanges:
+            sent_alerts.extend(
+                scan_exchange(
+                    exchange,
+                    symbol_manager,
+                    excluded_symbols,
+                    dry_run,
+                    alerts_enabled,
+                    telegram_send_lock,
+                )
+            )
 
-            if len(df) > 2:
-                # Current volume is the volume of the currently forming candle
-                curr_volume = df['volume'].iloc[-1]
-                # Volume of the last completed hour
-                last_completed_hour_volume = df['volume'].iloc[-2]
-                # Calculate the mean of the 6 hours before the last completed hour
-                # This means taking candles from index -8 up to (but not including) -2
-                prev_volume_mean = df['volume'].iloc[-8:-2].mean()
-
-                # Calculate last 2-hour and 4-hour volumes
-                # Ensure there are enough data points for these calculations
-                last_2h_volume = df['volume'].iloc[-3:-1].sum() if len(df) >= 3 else 0
-                last_4h_volume = df['volume'].iloc[-5:-1].sum() if len(df) >= 5 else 0
-
-                print(f"[{datetime.datetime.now()}] {symbol}: Current Volume = {curr_volume}, Previous 6h Mean Volume = {prev_volume_mean}, Last 2h Volume = {last_2h_volume}, Last 4h Volume = {last_4h_volume}")
-                
-                open_price = df['open'].iloc[-1]
-                close_price = df['close'].iloc[-1]
-                alert_details_list = get_volume_alert_details(curr_volume, prev_volume_mean, last_completed_hour_volume, open_price, close_price, symbol, '1h', 'BINANCE')
-
-                if alert_details_list:
-                    print(f"[{datetime.datetime.now()}] Alerts generated for {symbol}: {len(alert_details_list)}")
-                else:
-                    print(f"[{datetime.datetime.now()}] No alerts for {symbol}.")
-                for alert_detail in alert_details_list:
-                    symbol = alert_detail['symbol']
-                    level = alert_detail['level']
-                    
-                    # Check if the symbol is in the restricted list before proceeding
-                    if symbol_manager.is_symbol_excluded(symbol):
-                        print(f"[{datetime.datetime.now()}] Skipping alert for restricted symbol: {symbol}")
-                        continue
-
-                    if is_duplicate_alert(symbol, level, curr_volume):
-                        # The DEBUG print inside is_duplicate_alert is sufficient
-                        continue # Skip sending this alert
-
-                    else: # Only proceed if it's NOT a duplicate
-                        if get_setting("volume_alerts_enabled", "True") == "False":
-                            print(f"[{datetime.datetime.now()}] Skipping Telegram message for {symbol} - Alerts are DISABLED in settings.")
-                            continue
-
-                        alert_message = create_alert_message(alert_detail, last_2h_volume, last_4h_volume, last_completed_hour_volume, open_price, close_price, symbol)
-
-                        print(f"[{datetime.datetime.now()}] Sending Telegram message for {symbol} (Level: {level})...")
-                        # Always call send_telegram_message, let it handle dry_run internally
-                        if send_telegram_message(alert_message, include_restrict_button=True, dry_run=dry_run):
-                            # Update the timestamp for this alert and save the state ONLY if actually sent (not dry_run)
-                            if not dry_run:
-                                time.sleep(1)
-                                last_alert_timestamps[(symbol, level)] = {
-                                    'timestamp': datetime.datetime.now(),
-                                    'volume': curr_volume
-                                }
-                                print(f"[{datetime.datetime.now()}] DEBUG: Alert sent and timestamp updated for {symbol} (Level: {level}).")
-                                save_alert_state(last_alert_timestamps)
-
-        except requests.exceptions.RequestException as e:
-            print(f"[{datetime.datetime.now()}] Error fetching data for {symbol}: {e}")
-        except ValueError as e:
-            print(f"[{datetime.datetime.now()}] Error processing data for {symbol}: {e}")
-        except Exception as e:
-            print(f"[{datetime.datetime.now()}] An unexpected error occurred for {symbol}: {e}")
+    if sent_alerts and not dry_run:
+        for exchange_name, symbol, level, curr_volume in sent_alerts:
+            last_alert_timestamps[(exchange_name, symbol, level)] = {
+                'timestamp': datetime.datetime.now(),
+                'volume': curr_volume
+            }
+        save_alert_state(last_alert_timestamps)
 
 
 if __name__ == "__main__":

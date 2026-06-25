@@ -7,7 +7,7 @@ from datetime import datetime, time
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
-from telegram.error import TelegramError
+from telegram.error import BadRequest, TelegramError
 from symbol_manager import SymbolManager
 from src.services.watchlist_manager import WatchlistManager
 
@@ -18,9 +18,15 @@ from src.services.llm_strategy import analyze_and_suggest
 from src.services.performance_tracker import track_performance
 from src.services.db_service import get_performance_stats, init_db, get_suggestion_details, get_setting, set_setting
 from src.services.db_service import get_suggestions_between_dates, get_last_analyzed_symbols
+from src.services.alert_preferences import (
+    get_alert_exchange_selection,
+    normalize_alert_exchange_selection,
+    set_alert_exchange_selection,
+)
 from src.services.binance_permissions_service import permissions_service
 from src.services.market_data_service import get_top_volume_pairs, validate_trading_pair
 from src.services.signal_service import SignalService
+from src.exchanges.registry import get_supported_exchange_names
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +47,6 @@ TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID = load_telegram_credentials()
 
 if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
     print(f"[{datetime.now()}] Telegram bot token or chat ID not found. Bot will not start.")
-    exit()
 
 symbol_manager = SymbolManager()
 watchlist_manager = WatchlistManager()
@@ -65,6 +70,115 @@ def pop_pending_prompt(context):
         return None
     return user_data.pop('pending_prompt', None)
 
+
+def format_exchange_names(exchange_names):
+    return ", ".join(name.upper() for name in exchange_names)
+
+
+def get_alert_scope_summary(selection):
+    normalized = normalize_alert_exchange_selection(selection)
+    if normalized['mode'] == 'all':
+        return "🌍 Current alert scope: all exchanges"
+    if len(normalized['exchanges']) == 1:
+        return f"🎯 Current alert scope: single exchange ({normalized['exchanges'][0].upper()})"
+    return f"🗂 Current alert scope: multiple exchanges ({format_exchange_names(normalized['exchanges'])})"
+
+
+def build_alert_scope_markup(selection=None, view='root'):
+    normalized = normalize_alert_exchange_selection(selection)
+    supported = get_supported_exchange_names()
+    keyboard = []
+
+    if view == 'root':
+        keyboard.append([InlineKeyboardButton("🌍 All exchanges", callback_data="alertscope_mode|all")])
+        keyboard.append([InlineKeyboardButton("🎯 Single exchange", callback_data="alertscope_view|single")])
+        keyboard.append([InlineKeyboardButton("🗂 Multiple exchanges", callback_data="alertscope_view|multiple")])
+        keyboard.append([InlineKeyboardButton("⬅️ Back to main menu", callback_data="alertscope_view|main")])
+        return InlineKeyboardMarkup(keyboard)
+
+    if view == 'single':
+        for exchange_name in supported:
+            label = f"☑ {exchange_name.upper()}" if normalized['mode'] == 'selected' and normalized['exchanges'] == [exchange_name] else exchange_name.upper()
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"alertscope_set|single|{exchange_name}")])
+        keyboard.append([
+            InlineKeyboardButton("🌍 All exchanges", callback_data="alertscope_mode|all"),
+            InlineKeyboardButton("🗂 Multiple exchanges", callback_data="alertscope_view|multiple"),
+        ])
+        keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="alertscope_view|root")])
+        return InlineKeyboardMarkup(keyboard)
+
+    if view == 'multiple':
+        for exchange_name in supported:
+            checked = normalized['mode'] == 'all' or exchange_name in normalized['exchanges']
+            label = f"{'☑' if checked else '☐'} {exchange_name.upper()}"
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"alertscope_toggle|{exchange_name}")])
+        keyboard.append([InlineKeyboardButton("🌍 All exchanges", callback_data="alertscope_mode|all")])
+        keyboard.append([
+            InlineKeyboardButton("✅ Done", callback_data="alertscope_view|root"),
+            InlineKeyboardButton("⬅️ Back", callback_data="alertscope_view|root"),
+        ])
+        return InlineKeyboardMarkup(keyboard)
+
+    return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="alertscope_view|root")]])
+
+
+def render_alert_scope_message(selection, view='root'):
+    normalized = normalize_alert_exchange_selection(selection)
+    summary = get_alert_scope_summary(normalized)
+
+    if view == 'single':
+        return (
+            f"{summary}\n\n"
+            "Choose one exchange. This keeps alerts limited to a single venue."
+        )
+
+    if view == 'multiple':
+        exchange_list = format_exchange_names(get_supported_exchange_names())
+        return (
+            f"{summary}\n\n"
+            f"Toggle any subset of these exchanges: {exchange_list}.\n"
+            "If you select every exchange, the scope will collapse to all exchanges."
+        )
+
+    return (
+        f"{summary}\n\n"
+        "Choose how Telegram alerts should be routed. You can keep Binance-only behavior, add Kraken, or select all supported exchanges."
+    )
+
+
+def parse_alert_scope_args(args):
+    supported = set(get_supported_exchange_names())
+    if not args:
+        return None
+
+    lowered = [arg.lower() for arg in args]
+    if lowered[0] in {'all', 'every', 'everything'}:
+        return 'all'
+
+    if lowered[0] in {'single', 'one'}:
+        if len(args) < 2:
+            raise ValueError("Usage: /alerts_scope single <exchange>")
+        candidate = args[1].lower()
+        if candidate not in supported:
+            raise ValueError(f"Unsupported exchange: {args[1]}. Supported exchanges: {format_exchange_names(get_supported_exchange_names())}")
+        return candidate
+
+    if lowered[0] in {'multiple', 'multi'}:
+        candidates = args[1:]
+    else:
+        candidates = args
+
+    normalized = []
+    for candidate in candidates:
+        lowered_candidate = candidate.lower()
+        if lowered_candidate in supported and lowered_candidate not in normalized:
+            normalized.append(lowered_candidate)
+
+    if not normalized:
+        raise ValueError(f"Supported exchanges: {format_exchange_names(get_supported_exchange_names())}")
+
+    return normalized
+
 async def get_main_menu_markup():
     """Returns the main menu keyboard markup dynamic with last 5 used symbols."""
     last_symbols = await asyncio.to_thread(get_last_analyzed_symbols, 5)
@@ -83,6 +197,7 @@ async def get_main_menu_markup():
         InlineKeyboardButton("📊 History", callback_data="menu_history"),
         InlineKeyboardButton(alerts_text, callback_data="menu_toggle_alerts")
     ])
+    keyboard.append([InlineKeyboardButton("🎛 Alert Exchanges", callback_data="menu_alert_scope")])
     keyboard.append([InlineKeyboardButton("📜 List Restricted Pairs", callback_data="menu_list_restricted")])
     keyboard.append([
         InlineKeyboardButton("➕ Watch Symbol", callback_data="menu_watch_intro"),
@@ -126,6 +241,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/analyze <SYMBOL> - Get AI strategy (alias: /a)\n"
         "/history - Show trading performance stats\n"
         "/alerts - Toggle volume alerts on/off\n"
+        "/alerts_scope [all|single <exchange>|multiple <exchanges...>] - Set alert exchanges\n"
     )
     markup = await get_main_menu_markup()
     await update.effective_message.reply_text(help_text, reply_markup=markup)
@@ -521,6 +637,140 @@ async def toggle_alerts_command(update: Update, context: ContextTypes.DEFAULT_TY
     markup = await get_main_menu_markup()
     await update.effective_message.reply_text(f"Volume alerts are now {state_text}.", reply_markup=markup)
 
+
+async def alerts_scope_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat = update.effective_chat
+    if not chat:
+        await update.effective_message.reply_text("Unable to determine the chat scope for alert preferences.")
+        return
+
+    try:
+        selection = parse_alert_scope_args(context.args or [])
+    except ValueError as err:
+        await update.effective_message.reply_text(str(err))
+        return
+
+    if selection is not None:
+        selection = set_alert_exchange_selection(chat.id, selection)
+
+    current_selection = await asyncio.to_thread(get_alert_exchange_selection, chat.id)
+    markup = build_alert_scope_markup(current_selection, view='root')
+    await update.effective_message.reply_text(
+        render_alert_scope_message(current_selection, view='root'),
+        reply_markup=markup,
+    )
+
+
+async def alert_scope_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    chat = query.message.chat if query.message else None
+    if not chat:
+        await query.edit_message_text("Unable to determine the chat scope for alert preferences.")
+        return
+
+    data = query.data.split("|")
+    action = data[0]
+    selection = await asyncio.to_thread(get_alert_exchange_selection, chat.id)
+
+    if action == 'alertscope_mode':
+        mode = data[1] if len(data) > 1 else 'all'
+        if mode == 'all':
+            selection = await asyncio.to_thread(set_alert_exchange_selection, chat.id, 'all')
+            try:
+                await query.edit_message_text(
+                    render_alert_scope_message(selection, view='root'),
+                    reply_markup=build_alert_scope_markup(selection, view='root'),
+                )
+            except BadRequest as err:
+                if "Message is not modified" not in str(err):
+                    raise
+            return
+
+    if action == 'alertscope_set':
+        mode = data[1] if len(data) > 1 else 'single'
+        exchange_name = data[2] if len(data) > 2 else ''
+        if mode == 'single' and exchange_name:
+            selection = await asyncio.to_thread(set_alert_exchange_selection, chat.id, exchange_name)
+            try:
+                await query.edit_message_text(
+                    render_alert_scope_message(selection, view='root'),
+                    reply_markup=build_alert_scope_markup(selection, view='root'),
+                )
+            except BadRequest as err:
+                if "Message is not modified" not in str(err):
+                    raise
+            return
+
+    if action == 'alertscope_toggle':
+        exchange_name = data[1] if len(data) > 1 else ''
+        if not exchange_name:
+            await query.edit_message_text("❌ Unable to parse exchange selection.")
+            return
+
+        normalized = normalize_alert_exchange_selection(selection)
+        supported = get_supported_exchange_names()
+        if normalized['mode'] == 'all':
+            selected = [name for name in supported if name != exchange_name]
+        else:
+            selected = list(normalized['exchanges'])
+            if exchange_name in selected:
+                selected.remove(exchange_name)
+            else:
+                selected.append(exchange_name)
+
+        if not selected:
+            selected = 'all'
+        elif len(selected) == 1:
+            selected = selected[0]
+        elif set(selected) == set(supported):
+            selected = 'all'
+
+        selection = await asyncio.to_thread(set_alert_exchange_selection, chat.id, selected)
+        try:
+            await query.edit_message_text(
+                render_alert_scope_message(selection, view='multiple'),
+                reply_markup=build_alert_scope_markup(selection, view='multiple'),
+            )
+        except BadRequest as err:
+            if "Message is not modified" not in str(err):
+                raise
+        return
+
+    if action == 'alertscope_view':
+        view = data[1] if len(data) > 1 else 'root'
+        if view == 'main':
+            markup = await get_main_menu_markup()
+            try:
+                await query.edit_message_text(
+                    "Back to the main menu.",
+                    reply_markup=markup,
+                )
+            except BadRequest as err:
+                if "Message is not modified" not in str(err):
+                    raise
+            return
+
+        try:
+            await query.edit_message_text(
+                render_alert_scope_message(selection, view=view),
+                reply_markup=build_alert_scope_markup(selection, view=view),
+            )
+        except BadRequest as err:
+            if "Message is not modified" not in str(err):
+                raise
+        return
+
+    try:
+        await query.edit_message_text(
+            render_alert_scope_message(selection, view='root'),
+            reply_markup=build_alert_scope_markup(selection, view='root'),
+        )
+    except BadRequest as err:
+        if "Message is not modified" not in str(err):
+            raise
+
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles callback queries from the main menu buttons."""
     query = update.callback_query
@@ -547,6 +797,12 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await query.answer(f"Volume alerts turned {state_text}")
     elif data == "menu_new_analyze":
         await prompt_new_analysis(update, context)
+    elif data == "menu_alert_scope":
+        current_selection = await asyncio.to_thread(get_alert_exchange_selection, update.effective_chat.id)
+        await query.edit_message_text(
+            render_alert_scope_message(current_selection, view='root'),
+            reply_markup=build_alert_scope_markup(current_selection, view='root'),
+        )
     elif data == "menu_watch_intro":
         await prompt_watch_symbol(update, context)
     elif data == "menu_unwatch_intro":
@@ -583,6 +839,10 @@ def main() -> None:
         format='[%(asctime)s] %(levelname)s %(name)s: %(message)s'
     )
 
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.error("Telegram bot token or chat ID not found. Bot startup aborted.")
+        return
+
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Register handlers
@@ -594,6 +854,7 @@ def main() -> None:
     application.add_handler(CommandHandler("a", analyze_symbol)) # Shorthand
     application.add_handler(CommandHandler("history", show_history))
     application.add_handler(CommandHandler("alerts", toggle_alerts_command))
+    application.add_handler(CommandHandler("alerts_scope", alerts_scope_command))
     application.add_handler(CommandHandler("high_volume", high_volume))
     application.add_handler(CommandHandler("watch", watch_pair))
     application.add_handler(CommandHandler("unwatch", unwatch_pair))
@@ -604,6 +865,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(details_callback, pattern="^details_"))
     application.add_handler(CallbackQueryHandler(signal_details_callback, pattern="^signal_details"))
     application.add_handler(CallbackQueryHandler(history_details_callback, pattern="^history_details"))
+    application.add_handler(CallbackQueryHandler(alert_scope_callback, pattern="^alertscope_"))
     application.add_handler(CallbackQueryHandler(menu_callback, pattern="^menu_"))
 
     # Register debug message handler (filters out commands to avoid double logging if desired, 
