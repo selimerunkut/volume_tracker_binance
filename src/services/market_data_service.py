@@ -5,7 +5,6 @@ import requests
 import pandas as pd
 from datetime import datetime
 
-from .binance_permissions_service import permissions_service
 from src.exchanges.registry import get_exchange
 
 
@@ -40,12 +39,8 @@ def get_current_price(symbol, exchange_name='binance'):
     return exchange.get_current_price(symbol)
 
 
-def validate_trading_pair(symbol):
-    permission_result = permissions_service.can_trade_symbol(symbol)
-    if permission_result is not None:
-        return permission_result
-
-    exchange = get_exchange('binance')
+def validate_trading_pair(symbol, exchange_name='binance'):
+    exchange = get_exchange(exchange_name)
     return exchange.validate_symbol(symbol)
 
 
