@@ -3,6 +3,7 @@ import json
 import asyncio
 import html
 import logging
+import inspect
 from datetime import datetime, time
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
@@ -26,7 +27,7 @@ from src.services.alert_preferences import (
 from src.services.binance_permissions_service import permissions_service
 from src.services.market_data_service import get_top_volume_pairs, validate_trading_pair
 from src.services.signal_service import SignalService
-from src.exchanges.registry import get_supported_exchange_names
+from src.exchanges.registry import get_exchange, get_supported_exchange_names
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,216 @@ def pop_pending_prompt(context):
     if not user_data:
         return None
     return user_data.pop('pending_prompt', None)
+
+
+def set_pending_flow(context, action: str, symbol: str | None = None) -> None:
+    user_data = context.user_data
+    if user_data is None:
+        user_data = {}
+        context.user_data = user_data
+    user_data['pending_action'] = action
+    if symbol:
+        user_data['pending_symbol'] = symbol.upper()
+    else:
+        user_data.pop('pending_symbol', None)
+    user_data.pop('pending_prompt', None)
+    user_data.pop('pending_scope', None)
+
+
+def clear_pending_flow(context) -> None:
+    user_data = context.user_data
+    if not user_data:
+        return
+    for key in ('pending_action', 'pending_symbol', 'pending_prompt', 'pending_scope'):
+        user_data.pop(key, None)
+
+
+def get_pending_action(context):
+    user_data = context.user_data or {}
+    return user_data.get('pending_action')
+
+
+def get_pending_symbol(context):
+    user_data = context.user_data or {}
+    symbol = user_data.get('pending_symbol')
+    if symbol:
+        return str(symbol).upper()
+    return None
+
+
+def get_pending_scope(context):
+    user_data = context.user_data or {}
+    return normalize_alert_exchange_selection(user_data.get('pending_scope'))
+
+
+def get_pending_scope_raw(context):
+    user_data = context.user_data or {}
+    return user_data.get('pending_scope')
+
+
+def has_pending_scope(context) -> bool:
+    user_data = context.user_data or {}
+    return 'pending_scope' in user_data
+
+
+def set_pending_scope(context, scope):
+    user_data = context.user_data
+    if user_data is None:
+        user_data = {}
+        context.user_data = user_data
+    user_data['pending_scope'] = normalize_alert_exchange_selection(scope)
+
+
+def get_scope_summary(selection):
+    normalized = normalize_alert_exchange_selection(selection)
+    if normalized['mode'] == 'all':
+        return "🌍 Current scope: all exchanges"
+    if len(normalized['exchanges']) == 1:
+        return f"🎯 Current scope: single exchange ({normalized['exchanges'][0].upper()})"
+    return f"🗂 Current scope: multiple exchanges ({format_exchange_names(normalized['exchanges'])})"
+
+
+def get_alert_scope_summary(selection):
+    return get_scope_summary(selection)
+
+
+def _flow_prompt_copy(action: str):
+    return {
+        'analyze': {
+            'root': "Choose the exchange scope for this analysis.",
+            'single': "Choose one exchange for this analysis.",
+            'multiple': "Select one or more exchanges for this analysis.",
+            'symbol': "Send the trading pair symbol to analyze, for example BTCUSDC or BTCUSD.",
+        },
+        'watch': {
+            'root': "Choose the exchange scope for the symbol you want to watch.",
+            'single': "Choose one exchange for this watchlist entry.",
+            'multiple': "Select one or more exchanges for this watchlist entry.",
+            'symbol': "Send the trading pair symbol to watch.",
+        },
+        'unwatch': {
+            'root': "Choose the exchange scope for the symbol you want to remove.",
+            'single': "Choose one exchange for this removal.",
+            'multiple': "Select one or more exchanges for this removal.",
+            'symbol': "Send the trading pair symbol to remove from watchlist.",
+        },
+        'list': {
+            'root': "Choose which exchange watchlist you want to view.",
+            'single': "Choose one exchange to view.",
+            'multiple': "Select one or more exchanges to view.",
+            'symbol': None,
+        },
+    }[action]
+
+
+def build_scope_markup(action, selection=None, view='root'):
+    normalized = normalize_alert_exchange_selection(selection)
+    supported = get_supported_exchange_names()
+    keyboard = []
+
+    if view == 'root':
+        keyboard.append([InlineKeyboardButton("🌍 All exchanges", callback_data=f"scope|{action}|mode|all")])
+        keyboard.append([InlineKeyboardButton("🎯 Single exchange", callback_data=f"scope|{action}|view|single")])
+        keyboard.append([InlineKeyboardButton("🗂 Multiple exchanges", callback_data=f"scope|{action}|view|multiple")])
+        keyboard.append([InlineKeyboardButton("⬅️ Back to main menu", callback_data=f"scope|{action}|main")])
+        return InlineKeyboardMarkup(keyboard)
+
+    if view == 'single':
+        for exchange_name in supported:
+            label = f"☑ {exchange_name.upper()}" if normalized['mode'] == 'selected' and normalized['exchanges'] == [exchange_name] else exchange_name.upper()
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"scope|{action}|set|single|{exchange_name}")])
+        keyboard.append([
+            InlineKeyboardButton("🌍 All exchanges", callback_data=f"scope|{action}|mode|all"),
+            InlineKeyboardButton("🗂 Multiple exchanges", callback_data=f"scope|{action}|view|multiple"),
+        ])
+        keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=f"scope|{action}|view|root")])
+        return InlineKeyboardMarkup(keyboard)
+
+    if view == 'multiple':
+        for exchange_name in supported:
+            checked = normalized['mode'] == 'all' or exchange_name in normalized['exchanges']
+            label = f"{'☑' if checked else '☐'} {exchange_name.upper()}"
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"scope|{action}|toggle|{exchange_name}")])
+        keyboard.append([InlineKeyboardButton("🌍 All exchanges", callback_data=f"scope|{action}|mode|all")])
+        keyboard.append([
+            InlineKeyboardButton("✅ Done", callback_data=f"scope|{action}|done"),
+            InlineKeyboardButton("⬅️ Back", callback_data=f"scope|{action}|view|root"),
+        ])
+        return InlineKeyboardMarkup(keyboard)
+
+    return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=f"scope|{action}|view|root")]])
+
+
+def render_scope_message(action, selection=None, view='root'):
+    prompt_copy = _flow_prompt_copy(action)
+    summary = get_scope_summary(selection)
+    if view == 'root':
+        return f"{summary}\n\n{prompt_copy['root']}"
+    if view == 'single':
+        return f"{summary}\n\n{prompt_copy['single']}"
+    if view == 'multiple':
+        return f"{summary}\n\n{prompt_copy['multiple']}"
+    return f"{summary}\n\n{prompt_copy['root']}"
+
+
+async def safe_edit_message_text(query, text, reply_markup=None, parse_mode=None):
+    try:
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except BadRequest as err:
+        if "Message is not modified" not in str(err):
+            raise
+
+
+async def prompt_scoped_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str, symbol: str | None = None) -> None:
+    set_pending_flow(context, action, symbol=symbol)
+    selection = get_pending_scope(context)
+    markup = build_scope_markup(action, selection, view='root')
+    message = render_scope_message(action, selection, view='root')
+    if update.callback_query:
+        await update.callback_query.edit_message_text(message, reply_markup=markup)
+    else:
+        await update.effective_message.reply_text(message, reply_markup=markup)
+
+
+def get_flow_exchanges(scope):
+    normalized = normalize_alert_exchange_selection(scope)
+    if normalized['mode'] == 'all':
+        return get_supported_exchange_names()
+    return normalized['exchanges']
+
+
+async def complete_scoped_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str) -> None:
+    scope = get_pending_scope_raw(context)
+    symbol = get_pending_symbol(context)
+
+    if scope is None:
+        await prompt_scoped_flow(update, context, action, symbol=symbol)
+        return
+
+    if action == 'list':
+        await list_watch(update, context, scope=scope)
+        return
+
+    if not symbol:
+        set_pending_prompt(context, action)
+        prompt_text = _flow_prompt_copy(action)['symbol']
+        if update.callback_query:
+            await safe_edit_message_text(update.callback_query, prompt_text)
+        else:
+            await update.effective_message.reply_text(prompt_text)
+        return
+
+    if action == 'analyze':
+        await analyze_symbol(update, context, symbol=symbol, exchange_scope=scope)
+    elif action == 'watch':
+        await watch_pair(update, context, symbol=symbol, exchange_scope=scope)
+    elif action == 'unwatch':
+        await unwatch_pair(update, context, symbol=symbol, exchange_scope=scope)
+
+
+async def execute_scoped_action(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str) -> None:
+    await complete_scoped_flow(update, context, action)
+
 
 
 def format_exchange_names(exchange_names):
@@ -242,6 +453,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/history - Show trading performance stats\n"
         "/alerts - Toggle volume alerts on/off\n"
         "/alerts_scope [all|single <exchange>|multiple <exchanges...>] - Set alert exchanges\n"
+        "\nNote: /analyze, /watch, /unwatch, and /list_watch will ask you to choose Binance, Kraken, or all exchanges before proceeding.\n"
     )
     markup = await get_main_menu_markup()
     await update.effective_message.reply_text(help_text, reply_markup=markup)
@@ -284,48 +496,120 @@ async def high_volume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         
     await status_msg.edit_text("\n".join(lines), parse_mode='HTML')
 
-async def watch_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not context.args:
-        await update.effective_message.reply_text("Usage: /watch <SYMBOL>")
+async def watch_pair(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str | None = None, exchange_scope=None) -> None:
+    if symbol is None and context.args:
+        symbol = context.args[0].upper()
+    elif symbol is not None:
+        symbol = symbol.upper()
+    else:
+        symbol = get_pending_symbol(context)
+
+    scope = exchange_scope if exchange_scope is not None else get_pending_scope_raw(context)
+    if scope is None:
+        await prompt_scoped_flow(update, context, 'watch', symbol=symbol)
         return
-    symbol = context.args[0].upper()
-    is_valid, reason = await asyncio.to_thread(validate_trading_pair, symbol)
-    if not is_valid:
-        if reason == "invalid_symbol":
-            await update.effective_message.reply_text(
-                "❌ Invalid trading pair. Please provide a Binance pair symbol like BTCUSDC."
-            )
-        elif reason == "not_permitted":
-            trading_group = permissions_service.trading_group or "your trading group"
-            await update.effective_message.reply_text(
-                f"❌ {symbol} is not enabled for {trading_group}. Binance only allows pairs returned by /api/v3/exchangeInfo?permissions={trading_group}."
-            )
+
+    if not symbol:
+        set_pending_prompt(context, 'watch')
+        await update.effective_message.reply_text(
+            _flow_prompt_copy('watch')['symbol'],
+            reply_markup=ForceReply(selective=True)
+        )
+        return
+
+    exchanges = get_flow_exchanges(scope)
+    if not exchanges:
+        exchanges = get_supported_exchange_names()
+
+    results = []
+    for exchange_name in exchanges:
+        is_valid, reason = await asyncio.to_thread(validate_trading_pair, symbol, exchange_name=exchange_name)
+        if not is_valid:
+            if reason == "invalid_symbol":
+                results.append(f"{exchange_name.upper()}: invalid trading pair")
+            elif reason == "not_permitted":
+                trading_group = permissions_service.trading_group or "your trading group"
+                results.append(
+                    f"{exchange_name.upper()}: not enabled for {trading_group}"
+                )
+            else:
+                results.append(f"{exchange_name.upper()}: unable to verify symbol")
+            continue
+
+        added = watchlist_manager.add_symbol(symbol, exchange_name=exchange_name)
+        if added:
+            results.append(f"{exchange_name.upper()}: added {symbol}")
         else:
-            await update.effective_message.reply_text(
-                "⚠️ Unable to verify the symbol right now. Please try again later."
-            )
-        return
-    if watchlist_manager.add_symbol(symbol):
-        await update.effective_message.reply_text(f"✅ Added {symbol} to signal watchlist.")
-    else:
-        await update.effective_message.reply_text(f"ℹ️ {symbol} is already in watchlist.")
+            results.append(f"{exchange_name.upper()}: already watching {symbol}")
 
-async def unwatch_pair(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not context.args:
-        await update.effective_message.reply_text("Usage: /unwatch <SYMBOL>")
-        return
-    symbol = context.args[0].upper()
-    if watchlist_manager.remove_symbol(symbol):
-        await update.effective_message.reply_text(f"✅ Removed {symbol} from signal watchlist.")
-    else:
-        await update.effective_message.reply_text(f"ℹ️ {symbol} not in watchlist.")
+    clear_pending_flow(context)
+    await update.effective_message.reply_text("✅ Watchlist update:\n" + "\n".join(results))
 
-async def list_watch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    watchlist = watchlist_manager.get_watchlist()
-    if not watchlist:
-        await update.effective_message.reply_text("Signal watchlist is empty.")
+async def unwatch_pair(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str | None = None, exchange_scope=None) -> None:
+    if symbol is None and context.args:
+        symbol = context.args[0].upper()
+    elif symbol is not None:
+        symbol = symbol.upper()
     else:
-        await update.effective_message.reply_text("🔭 <b>Signal Watchlist:</b>\n" + "\n".join(watchlist), parse_mode='HTML')
+        symbol = get_pending_symbol(context)
+
+    scope = exchange_scope if exchange_scope is not None else get_pending_scope_raw(context)
+    if scope is None:
+        await prompt_scoped_flow(update, context, 'unwatch', symbol=symbol)
+        return
+
+    if not symbol:
+        set_pending_prompt(context, 'unwatch')
+        await update.effective_message.reply_text(
+            _flow_prompt_copy('unwatch')['symbol'],
+            reply_markup=ForceReply(selective=True)
+        )
+        return
+
+    exchanges = get_flow_exchanges(scope)
+    if not exchanges:
+        exchanges = get_supported_exchange_names()
+
+    results = []
+    for exchange_name in exchanges:
+        removed = watchlist_manager.remove_symbol(symbol, exchange_name=exchange_name)
+        if removed:
+            results.append(f"{exchange_name.upper()}: removed {symbol}")
+        else:
+            results.append(f"{exchange_name.upper()}: not in watchlist")
+
+    clear_pending_flow(context)
+    await update.effective_message.reply_text("✅ Watchlist removal:\n" + "\n".join(results))
+
+async def list_watch(update: Update, context: ContextTypes.DEFAULT_TYPE, scope=None) -> None:
+    selection = normalize_alert_exchange_selection(scope or get_pending_scope_raw(context))
+    if scope is None and not has_pending_scope(context):
+        await prompt_scoped_flow(update, context, 'list')
+        return
+
+    watchlists = watchlist_manager.get_watchlists()
+    exchanges = get_flow_exchanges(selection)
+    if not exchanges:
+        exchanges = get_supported_exchange_names()
+
+    lines = ["🔭 <b>Signal Watchlist:</b>"]
+    has_any = False
+    for exchange_name in exchanges:
+        symbols = watchlists.get(exchange_name, [])
+        if not symbols:
+            continue
+        has_any = True
+        lines.append(f"\n<b>{exchange_name.upper()}</b>")
+        for symbol in symbols:
+            lines.append(symbol)
+
+    clear_pending_flow(context)
+
+    if not has_any:
+        await update.effective_message.reply_text("No watched pairs found for the selected exchange scope.")
+        return
+
+    await update.effective_message.reply_text("\n".join(lines), parse_mode='HTML')
 
 
 async def run_signals_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -390,77 +674,119 @@ async def debug_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
             if pending_prompt == 'analyze':
                 logger.info(f"DEBUG: Recognized symbol from prompt reply: {symbol}")
                 context.args = [symbol]
-                await analyze_symbol(update, context)
+                await analyze_symbol(update, context, symbol=symbol)
                 return
             if pending_prompt == 'watch':
                 context.args = [symbol]
-                await watch_pair(update, context)
+                await watch_pair(update, context, symbol=symbol)
                 return
             if pending_prompt == 'unwatch':
                 context.args = [symbol]
-                await unwatch_pair(update, context)
+                await unwatch_pair(update, context, symbol=symbol)
                 return
 
     elif update.callback_query:
         logger.info(f"DEBUG: Received callback query from {update.effective_user.username}: {update.callback_query.data}")
 
-async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str | None = None, exchange_scope=None) -> None:
     """Analyzes a symbol using AI strategy."""
-    logger.info(f"DEBUG: analyze_symbol reached with args: {context.args}")
-    if not context.args:
-        await update.effective_message.reply_text("Usage: /analyze <SYMBOL> (e.g., /analyze BTCUSDC)")
+    logger.info(f"DEBUG: analyze_symbol reached with args: {getattr(context, 'args', [])}")
+    if symbol is None and context.args:
+        symbol = context.args[0].upper()
+    elif symbol is not None:
+        symbol = symbol.upper()
+    else:
+        symbol = get_pending_symbol(context)
+
+    pending_scope = exchange_scope if exchange_scope is not None else get_pending_scope_raw(context)
+    if pending_scope is None:
+        await prompt_scoped_flow(update, context, 'analyze', symbol=symbol)
+        return
+    if not symbol:
+        set_pending_prompt(context, 'analyze')
+        await update.effective_message.reply_text(
+            _flow_prompt_copy('analyze')['symbol'],
+            reply_markup=ForceReply(selective=True)
+        )
         return
 
-    symbol = context.args[0].upper()
-    logger.info(f"DEBUG: Processing analysis for symbol: {symbol}")
-    
-    status_msg = await update.effective_message.reply_text(f"🔍 Analyzing {symbol}... This may take a moment.")
+    exchanges = get_flow_exchanges(pending_scope)
+    if not exchanges:
+        exchanges = get_supported_exchange_names()
+
+    logger.info(f"DEBUG: Processing analysis for symbol: {symbol} on {exchanges}")
+    progress_text = f"🔍 Analyzing {symbol} on {format_exchange_names(exchanges)}... This may take a moment."
+    if update.callback_query:
+        status_editor = update.callback_query
+        await safe_edit_message_text(status_editor, progress_text)
+    else:
+        status_editor = await update.effective_message.reply_text(progress_text)
 
     try:
-        # Run analysis in a separate thread to not block the bot
-        strategy = await asyncio.to_thread(analyze_and_suggest, symbol)
-        
-        if not strategy:
-            await status_msg.edit_text(f"❌ Failed to analyze {symbol}. Check logs or try again.")
-            return
-
-        if "error" in strategy:
-            await status_msg.edit_text(f"❌ Error: {html.escape(str(strategy['error']))}")
-            return
-
-        # Format the response using HTML (safer than Markdown v1 for LLM-generated text)
-        action = html.escape(str(strategy.get('action', 'N/A')))
-        confidence = strategy.get('confidence', 0)
-        reasoning = html.escape(str(strategy.get('reasoning', 'N/A')))
-
-        response = (
-            f"🤖 <b>Strategy for {symbol}</b>\n\n"
-            f"<b>Action</b>: {action} "
-            f"(Confidence: {confidence}%)\n"
-        )
-        
-        if strategy.get('action') in ['LONG', 'SHORT']:
-            response += (
-                f"<b>Entry</b>: {strategy.get('entry')}\n"
-                f"<b>TP</b>: {strategy.get('tp')}\n"
-                f"<b>SL</b>: {strategy.get('sl')}\n\n"
-            )
-        
-        response += f"<b>Reasoning</b>: {reasoning}"
-        
+        responses = []
         reply_markup = None
-        if strategy.get('suggestion_id'):
-            keyboard = [
-                [InlineKeyboardButton("📜 View Analysis Details", callback_data=f"details_{strategy['suggestion_id']}")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await status_msg.edit_text(response, parse_mode='HTML', reply_markup=reply_markup)
+        for exchange_name in exchanges:
+            strategy_candidate = await asyncio.to_thread(analyze_and_suggest, symbol, exchange_name=exchange_name)
+            if inspect.isawaitable(strategy_candidate):
+                strategy = await strategy_candidate
+            else:
+                strategy = strategy_candidate
+            if not strategy:
+                responses.append(f"{exchange_name.upper()}: failed to analyze")
+                continue
+
+            if "error" in strategy:
+                responses.append(f"{exchange_name.upper()}: error - {html.escape(str(strategy['error']))}")
+                continue
+
+            action = html.escape(str(strategy.get('action', 'N/A')))
+            confidence = strategy.get('confidence', 0)
+            reasoning = html.escape(str(strategy.get('reasoning', 'N/A')))
+
+            response = (
+                f"🤖 <b>{exchange_name.upper()} strategy for {symbol}</b>\n\n"
+                f"<b>Action</b>: {action} "
+                f"(Confidence: {confidence}%)\n"
+            )
+
+            if strategy.get('action') in ['LONG', 'SHORT']:
+                response += (
+                    f"<b>Entry</b>: {strategy.get('entry')}\n"
+                    f"<b>TP</b>: {strategy.get('tp')}\n"
+                    f"<b>SL</b>: {strategy.get('sl')}\n\n"
+                )
+
+            response += f"<b>Reasoning</b>: {reasoning}"
+            responses.append(response)
+
+            if strategy.get('suggestion_id') and reply_markup is None:
+                keyboard = [
+                    [InlineKeyboardButton("📜 View Analysis Details", callback_data=f"details_{strategy['suggestion_id']}")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if not responses:
+            if update.callback_query:
+                await safe_edit_message_text(status_editor, f"❌ Failed to analyze {symbol}. Check logs or try again.")
+            else:
+                await status_editor.edit_text(f"❌ Failed to analyze {symbol}. Check logs or try again.")
+            clear_pending_flow(context)
+            return
+
+        if update.callback_query:
+            await safe_edit_message_text(status_editor, "\n\n".join(responses), parse_mode='HTML', reply_markup=reply_markup)
+        else:
+            await status_editor.edit_text("\n\n".join(responses), parse_mode='HTML', reply_markup=reply_markup)
+        clear_pending_flow(context)
 
     except Exception as e:
         logger.error(f"Unexpected error in analyze_symbol: {e}")
         try:
-            await status_msg.edit_text(f"❌ An unexpected error occurred: {html.escape(str(e))}")
+            error_text = f"❌ An unexpected error occurred: {html.escape(str(e))}"
+            if update.callback_query:
+                await safe_edit_message_text(status_editor, error_text)
+            else:
+                await status_editor.edit_text(error_text)
         except TelegramError:
             pass
 
@@ -779,8 +1105,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     data = query.data
     if data.startswith("menu_analyze_"):
         symbol = data.replace("menu_analyze_", "")
-        context.args = [symbol]
-        await analyze_symbol(update, context)
+        await prompt_scoped_flow(update, context, 'analyze', symbol=symbol)
     elif data == "menu_history":
         context.args = [] # Clear args for show_history
         await show_history(update, context)
@@ -796,7 +1121,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await query.edit_message_reply_markup(reply_markup=markup)
         await query.answer(f"Volume alerts turned {state_text}")
     elif data == "menu_new_analyze":
-        await prompt_new_analysis(update, context)
+        await prompt_scoped_flow(update, context, 'analyze')
     elif data == "menu_alert_scope":
         current_selection = await asyncio.to_thread(get_alert_exchange_selection, update.effective_chat.id)
         await query.edit_message_text(
@@ -804,15 +1129,107 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             reply_markup=build_alert_scope_markup(current_selection, view='root'),
         )
     elif data == "menu_watch_intro":
-        await prompt_watch_symbol(update, context)
+        await prompt_scoped_flow(update, context, 'watch')
     elif data == "menu_unwatch_intro":
-        await prompt_unwatch_symbol(update, context)
+        await prompt_scoped_flow(update, context, 'unwatch')
     elif data == "menu_run_signals":
         await run_signals_command(update, context)
     elif data == "menu_list_watch":
-        await list_watch(update, context)
+        await prompt_scoped_flow(update, context, 'list')
     elif data == "menu_high_volume":
         await high_volume(update, context)
+
+
+async def scope_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    parts = query.data.split("|")
+    if len(parts) < 3:
+        await safe_edit_message_text(query, "❌ Unable to parse the exchange scope selection.")
+        return
+
+    _, action, verb, *rest = parts
+    current_scope = get_pending_scope(context)
+
+    if verb == "main":
+        clear_pending_flow(context)
+        markup = await get_main_menu_markup()
+        await safe_edit_message_text(query, "Back to the main menu.", reply_markup=markup)
+        return
+
+    if verb == "view":
+        view = rest[0] if rest else "root"
+        await safe_edit_message_text(
+            query,
+            render_scope_message(action, current_scope, view=view),
+            reply_markup=build_scope_markup(action, current_scope, view=view),
+        )
+        return
+
+    if verb == "toggle":
+        exchange_name = rest[0] if rest else ""
+        if not exchange_name:
+            await safe_edit_message_text(query, "❌ Unable to parse exchange selection.")
+            return
+
+        normalized = normalize_alert_exchange_selection(current_scope)
+        supported = get_supported_exchange_names()
+        if normalized['mode'] == 'all':
+            selected = [name for name in supported if name != exchange_name]
+        else:
+            selected = list(normalized['exchanges'])
+            if exchange_name in selected:
+                selected.remove(exchange_name)
+            else:
+                selected.append(exchange_name)
+
+        if not selected:
+            selected = 'all'
+        elif len(selected) == 1:
+            selected = selected[0]
+        elif set(selected) == set(supported):
+            selected = 'all'
+
+        set_pending_scope(context, selected)
+        updated_scope = get_pending_scope(context)
+        await safe_edit_message_text(
+            query,
+            render_scope_message(action, updated_scope, view='multiple'),
+            reply_markup=build_scope_markup(action, updated_scope, view='multiple'),
+        )
+        return
+
+    if verb == "mode":
+        mode = rest[0] if rest else "all"
+        if mode != "all":
+            await safe_edit_message_text(query, "❌ Unsupported scope mode.")
+            return
+        set_pending_scope(context, 'all')
+        await complete_scoped_flow(update, context, action)
+        return
+
+    if verb == "set":
+        scope_kind = rest[0] if rest else "single"
+        exchange_name = rest[1] if len(rest) > 1 else ""
+        if scope_kind != "single" or not exchange_name:
+            await safe_edit_message_text(query, "❌ Unable to parse exchange selection.")
+            return
+        set_pending_scope(context, exchange_name)
+        await complete_scoped_flow(update, context, action)
+        return
+
+    if verb == "done":
+        if not get_pending_scope(context):
+            set_pending_scope(context, 'all')
+        await complete_scoped_flow(update, context, action)
+        return
+
+    await safe_edit_message_text(
+        query,
+        render_scope_message(action, current_scope, view='root'),
+        reply_markup=build_scope_markup(action, current_scope, view='root'),
+    )
 
 async def run_tracker(context: ContextTypes.DEFAULT_TYPE) -> None:
     print(f"[{datetime.now()}] Running background performance tracker...")
@@ -865,6 +1282,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(details_callback, pattern="^details_"))
     application.add_handler(CallbackQueryHandler(signal_details_callback, pattern="^signal_details"))
     application.add_handler(CallbackQueryHandler(history_details_callback, pattern="^history_details"))
+    application.add_handler(CallbackQueryHandler(scope_callback, pattern="^scope\\|"))
     application.add_handler(CallbackQueryHandler(alert_scope_callback, pattern="^alertscope_"))
     application.add_handler(CallbackQueryHandler(menu_callback, pattern="^menu_"))
 

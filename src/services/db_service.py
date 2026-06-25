@@ -190,16 +190,24 @@ def save_signal_trade(symbol, timeframe, signal_type, action, entry_price, expla
     return signal_id
 
 
-def get_last_signal_trade(symbol, timeframe, action):
+def get_last_signal_trade(symbol, timeframe, action, dedup_key=None):
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('''
-        SELECT * FROM signal_trades
-        WHERE symbol = ? AND timeframe = ? AND action = ?
-        ORDER BY entry_ts DESC
-        LIMIT 1
-    ''', (symbol.upper(), timeframe, action.upper()))
+    if dedup_key:
+        cursor.execute('''
+            SELECT * FROM signal_trades
+            WHERE dedup_key = ?
+            ORDER BY entry_ts DESC
+            LIMIT 1
+        ''', (dedup_key,))
+    else:
+        cursor.execute('''
+            SELECT * FROM signal_trades
+            WHERE symbol = ? AND timeframe = ? AND action = ?
+            ORDER BY entry_ts DESC
+            LIMIT 1
+        ''', (symbol.upper(), timeframe, action.upper()))
 
     row = cursor.fetchone()
     conn.close()

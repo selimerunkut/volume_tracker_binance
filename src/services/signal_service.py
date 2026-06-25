@@ -32,51 +32,63 @@ class SignalService:
     async def check_signals(self, timeframe='1h', exchange_name=None):
         exchange_name = normalize_exchange_name(exchange_name or self.exchange_name)
         self.watchlist_manager.refresh()
-        symbols = self.watchlist_manager.get_watchlist()
-        if not symbols:
+        if hasattr(self.watchlist_manager, 'get_watchlists'):
+            watchlists = self.watchlist_manager.get_watchlists()
+        else:
+            symbols = self.watchlist_manager.get_watchlist()
+            watchlists = {exchange_name: symbols} if symbols else {}
+
+        if not watchlists:
             return
 
-        for symbol in symbols:
-            try:
-                df = fetch_klines(symbol, interval=timeframe, limit=100, exchange_name=exchange_name)
-                if df.empty:
-                    continue
-                
-                df = calculate_indicators(df)
-                if timeframe == '1h':
-                    signal = evaluate_hourly_strategy(df)
-                    explanation = describe_hourly_signal(df, signal)
-                else:
-                    signal = evaluate_daily_strategy(df)
-                    explanation = describe_daily_signal(df, signal)
+        for exchange_name, symbols in watchlists.items():
+            if not symbols:
+                continue
 
-                if signal != 'WAIT':
-                    now = datetime.now()
-                    last_signal = get_last_signal_trade(symbol, timeframe, signal)
-                    if last_signal:
-                        prev_entry = datetime.fromisoformat(last_signal['entry_ts'])
-                        if (now - prev_entry).total_seconds() < SIGNAL_COOLDOWN_SECONDS:
-                            logger.info(f"Skipping duplicate {signal} signal for {symbol} {timeframe} (cooldown)")
-                            continue
-                    entry_price = await asyncio.to_thread(get_current_price, symbol, exchange_name=exchange_name)
-                    if entry_price is None:
-                        logger.warning(f"Cannot persist {signal} signal for {symbol}: entry price unavailable")
+            for symbol in symbols:
+                try:
+                    df = fetch_klines(symbol, interval=timeframe, limit=100, exchange_name=exchange_name)
+                    if df.empty:
+                        continue
+                    
+                    df = calculate_indicators(df)
+                    if timeframe == '1h':
+                        signal = evaluate_hourly_strategy(df)
+                        explanation = describe_hourly_signal(df, signal)
                     else:
-                        signal_type = 'hourly' if timeframe == '1h' else 'daily'
-                        dedup_key = f"{symbol}_{timeframe}_{signal}"
-                        save_signal_trade(symbol, timeframe, signal_type, signal, entry_price, explanation, dedup_key)
-                    last_key = (symbol, timeframe)
-                    if self.last_signals.get(last_key) != signal:
-                        self.last_signals[last_key] = signal
-                        self.record_signal_context(symbol, timeframe, signal, explanation)
-                        await self.notify_signal(symbol, timeframe, signal, explanation)
-                else:
-                    self.last_signals[(symbol, timeframe)] = 'WAIT'
-                
-                await asyncio.sleep(0.5)
-                
-            except Exception as e:
-                logger.error(f"Error checking {timeframe} signals for {symbol}: {e}")
+                        signal = evaluate_daily_strategy(df)
+                        explanation = describe_daily_signal(df, signal)
+
+                    if signal != 'WAIT':
+                        now = datetime.now()
+                        dedup_key = f"{exchange_name}:{symbol}:{timeframe}:{signal}"
+                        try:
+                            last_signal = get_last_signal_trade(symbol, timeframe, signal, dedup_key=dedup_key)
+                        except TypeError:
+                            last_signal = get_last_signal_trade(symbol, timeframe, signal)
+                        if last_signal:
+                            prev_entry = datetime.fromisoformat(last_signal['entry_ts'])
+                            if (now - prev_entry).total_seconds() < SIGNAL_COOLDOWN_SECONDS:
+                                logger.info(f"Skipping duplicate {signal} signal for {exchange_name.upper()} {symbol} {timeframe} (cooldown)")
+                                continue
+                        entry_price = await asyncio.to_thread(get_current_price, symbol, exchange_name=exchange_name)
+                        if entry_price is None:
+                            logger.warning(f"Cannot persist {signal} signal for {exchange_name.upper()} {symbol}: entry price unavailable")
+                        else:
+                            signal_type = 'hourly' if timeframe == '1h' else 'daily'
+                            save_signal_trade(symbol, timeframe, signal_type, signal, entry_price, explanation, dedup_key)
+                        last_key = (exchange_name, symbol, timeframe)
+                        if self.last_signals.get(last_key) != signal:
+                            self.last_signals[last_key] = signal
+                            self.record_signal_context(symbol, timeframe, signal, explanation, exchange_name=exchange_name)
+                            await self.notify_signal(symbol, timeframe, signal, explanation)
+                    else:
+                        self.last_signals[(exchange_name, symbol, timeframe)] = 'WAIT'
+                    
+                    await asyncio.sleep(0.5)
+                    
+                except Exception as e:
+                    logger.error(f"Error checking {timeframe} signals for {exchange_name.upper()} {symbol}: {e}")
 
     async def notify_signal(self, symbol, timeframe, signal, explanation):
         if not self.bot_context or not self.chat_id:
@@ -106,12 +118,17 @@ class SignalService:
         except Exception as e:
             logger.error(f"Failed to send signal notification: {e}")
 
-    def record_signal_context(self, symbol, timeframe, signal, explanation):
-        self.signal_contexts[(symbol, timeframe)] = {
+    def record_signal_context(self, symbol, timeframe, signal, explanation, exchange_name=None):
+        context = {
             "signal": signal,
             "generated_at": datetime.now(),
             "explanation": explanation or "Signal generated from the configured strategy without additional details."
         }
+        self.signal_contexts[(symbol, timeframe)] = context
+        if exchange_name:
+            self.signal_contexts[(exchange_name, symbol, timeframe)] = context
 
-    def get_signal_context(self, symbol, timeframe):
+    def get_signal_context(self, symbol, timeframe, exchange_name=None):
+        if exchange_name:
+            return self.signal_contexts.get((exchange_name, symbol, timeframe))
         return self.signal_contexts.get((symbol, timeframe))
