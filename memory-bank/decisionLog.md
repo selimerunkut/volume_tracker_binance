@@ -59,3 +59,9 @@ Implementation Details:
 **Implementation Details**:
     - Added logic to `debug_message_handler` to detect 3-12 character uppercase strings as symbols.
     - Simplified criteria to be more inclusive while avoiding command collisions.
+[2026-06-25 14:10:00] - **Decision**: Keep the alert exchange selector chat-scoped and normalize it to `all`, `single`, or `multiple`.
+**Rationale**: Binance should continue to behave like before, Kraken should share the same alert flow, and future exchanges should not require branching the Telegram menu or the scanner loop.
+**Implementation Details**:
+    - Added a shared exchange registry to resolve supported exchanges.
+    - Persisted the alert scope per Telegram chat.
+    - Collapsed full-coverage selections to `all` so the selector remains stable as exchanges are added or removed.

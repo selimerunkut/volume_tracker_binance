@@ -16,15 +16,21 @@ from .db_service import save_signal_trade, get_last_signal_trade
 logger = logging.getLogger(__name__)
 SIGNAL_COOLDOWN_SECONDS = 3600
 
+
+def normalize_exchange_name(exchange_name='binance'):
+    return (exchange_name or 'binance').strip().lower() or 'binance'
+
 class SignalService:
-    def __init__(self, bot_context=None, chat_id=None, watchlist_manager=None):
+    def __init__(self, bot_context=None, chat_id=None, watchlist_manager=None, exchange_name='binance'):
         self.bot_context = bot_context
         self.chat_id = chat_id
         self.watchlist_manager = watchlist_manager or WatchlistManager()
+        self.exchange_name = normalize_exchange_name(exchange_name)
         self.last_signals = {}
         self.signal_contexts = {}
 
-    async def check_signals(self, timeframe='1h'):
+    async def check_signals(self, timeframe='1h', exchange_name=None):
+        exchange_name = normalize_exchange_name(exchange_name or self.exchange_name)
         self.watchlist_manager.refresh()
         symbols = self.watchlist_manager.get_watchlist()
         if not symbols:
@@ -32,7 +38,7 @@ class SignalService:
 
         for symbol in symbols:
             try:
-                df = fetch_klines(symbol, interval=timeframe, limit=100)
+                df = fetch_klines(symbol, interval=timeframe, limit=100, exchange_name=exchange_name)
                 if df.empty:
                     continue
                 
@@ -52,7 +58,7 @@ class SignalService:
                         if (now - prev_entry).total_seconds() < SIGNAL_COOLDOWN_SECONDS:
                             logger.info(f"Skipping duplicate {signal} signal for {symbol} {timeframe} (cooldown)")
                             continue
-                    entry_price = await asyncio.to_thread(get_current_price, symbol)
+                    entry_price = await asyncio.to_thread(get_current_price, symbol, exchange_name=exchange_name)
                     if entry_price is None:
                         logger.warning(f"Cannot persist {signal} signal for {symbol}: entry price unavailable")
                     else:

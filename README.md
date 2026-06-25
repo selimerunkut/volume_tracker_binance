@@ -1,11 +1,11 @@
-# Binance Volume Tracker & AI Strategy Advisor
+# Multi-Exchange Volume Tracker & AI Strategy Advisor
 
-This project tracks cryptocurrency volume on Binance and sends alerts based on predefined volume levels. It also includes an **AI-powered Strategy Advisor** that analyzes market data, technical indicators, and news to suggest trading strategies with a self-improving learning loop.
+This project tracks cryptocurrency volume on Binance and Kraken and sends alerts based on predefined volume levels. It is built around a modular exchange registry so future exchanges can be added without breaking the existing Binance/Kraken behavior. The project also includes an **AI-powered Strategy Advisor** that analyzes market data, technical indicators, and news to suggest trading strategies with a self-improving learning loop.
 
 ## Features
 
 ### Volume Tracker
-- Fetches real-time volume data for USDC pairs on Binance.
+- Fetches real-time volume data for supported exchange pairs on Binance and Kraken.
 - Calculates current volume against historical mean volume.
 - Generates alerts for significant volume changes.
 - Sends detailed alerts to Telegram, including:
@@ -13,7 +13,8 @@ This project tracks cryptocurrency volume on Binance and sends alerts based on p
     - Current and previous 24h mean volumes (formatted as integers)
     - Alert level
     - Links to TradingView chart
-    - Links to Binance trade page
+    - Exchange-specific trade links when available
+    - Exchange scope so you can see whether an alert came from Binance, Kraken, or a future supported venue
 
 ### AI Strategy Advisor (New)
 - **Smart Analysis**: Uses LLM (via OpenRouter) to analyze technical indicators (RSI, MACD, Bollinger Bands, EMA) and crypto news.
@@ -26,7 +27,13 @@ This project tracks cryptocurrency volume on Binance and sends alerts based on p
 - `/history` - View performance statistics (wins, losses, win rate, average PnL).
 - `/list_restricted` - List all restricted trading pairs.
 - `/unrestrict <SYMBOL>` - Unrestrict a specific pair.
+- `/alerts_scope` - Choose which exchanges the bot should use for alerts.
 - Dynamic pair restriction from alert messages via inline buttons.
+- Chat-scoped exchange preferences support:
+  - single exchange selection
+  - multiple exchange selection
+  - all exchanges
+  - a universal menu that stays modular as new exchanges are added
 
 ## Setup
 
@@ -45,7 +52,7 @@ This project tracks cryptocurrency volume on Binance and sends alerts based on p
     (Note: Dependencies are managed via `pyproject.toml`.)
 
 3.  **Configure Credentials:**
-    Create `credentials_b.json` in the project root directory. This file will store both your Binance API credentials and Telegram bot credentials.
+    Create `credentials_b.json` in the project root directory. This file will store the credentials used by the bot and any exchange-specific API access that you enable.
 
     `credentials_b.json`:
     ```json
@@ -67,32 +74,33 @@ This project tracks cryptocurrency volume on Binance and sends alerts based on p
     - The `llm_model` can be changed to any OpenRouter-supported model.
 
 4.  **Run the Application:**
-    The application consists of two main components that should be run concurrently:
+    The application consists of two main components that can be run concurrently:
 
     a.  **Run the Telegram Bot Handler** (includes AI Strategy Advisor):
         ```bash
-        python telegram_bot_handler.py
+        .venv/bin/python telegram_bot_handler.py
         ```
         This starts the Telegram bot with all features:
         - Volume alert management with inline buttons
+        - Exchange scope selection for Binance, Kraken, or all supported exchanges
         - AI strategy analysis (`/analyze` command)
         - Performance tracking (`/history` command)
         - Background job that evaluates suggestion outcomes every 30 minutes
 
     b.  **Run the Volume Alert Script** (optional, separate process):
         ```bash
-        python b_volume_alerts.py
+        .venv/bin/python b_volume_alerts.py
         ```
         This script continuously monitors volume and sends alerts independently.
-        **Note:** The volume alerts are separate from the AI strategy advisor and run as a different process.
+        **Note:** The volume alerts are separate from the AI strategy advisor and run as a different process. The scanner reads the chat-scoped exchange selection so the same menu controls Binance, Kraken, and future exchanges consistently.
 
     **Quick Start (Development):**
     ```bash
     # Terminal 1: Start the Telegram bot (includes all AI features)
-    python telegram_bot_handler.py
+    .venv/bin/python telegram_bot_handler.py
     
     # Terminal 2: Start volume monitoring (optional)
-    python b_volume_alerts.py
+    .venv/bin/python b_volume_alerts.py
     ```
 
 ## Telegram Bot Commands
@@ -140,6 +148,7 @@ This project tracks cryptocurrency volume on Binance and sends alerts based on p
     /history - Show trading performance stats
     /list_restricted - List all restricted trading pairs
     /unrestrict <SYMBOL> - Unrestrict a specific trading pair
+    /alerts_scope - Set the alert exchange scope
     ```
 
 *   `/list_restricted` - List all currently restricted trading pairs.
@@ -155,6 +164,8 @@ This project tracks cryptocurrency volume on Binance and sends alerts based on p
     ```
     Successfully unrestricted ELFBTC.
     ```
+
+*   `/alerts_scope` - Open the alert exchange selector. Use it to choose a single exchange, several exchanges, or all supported exchanges. The selector is shared by the volume scanner and keeps other exchange-specific behavior modular.
 
 ## Scheduling with Systemd on Ubuntu
 
@@ -174,7 +185,7 @@ Add the following content:
 
 ```ini
 [Unit]
-Description=Binance AI Strategy Advisor Bot
+Description=Multi-Exchange AI Strategy Advisor Bot
 After=network.target
 
 [Service]
@@ -212,7 +223,7 @@ Create `/etc/systemd/system/binance-volume-tracker.service`:
 
 ```ini
 [Unit]
-Description=Binance Volume Tracker
+Description=Multi-Exchange Volume Tracker
 After=network.target
 
 [Service]

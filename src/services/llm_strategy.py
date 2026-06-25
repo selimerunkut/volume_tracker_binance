@@ -63,6 +63,12 @@ def get_llm_model():
     # Default to a more stable model ID
     return creds.get('llm_model', 'google/gemini-2.0-flash-001')
 
+
+def normalize_exchange_name(exchange_name='binance'):
+    """Normalize exchange names while preserving the existing Binance default."""
+    normalized = (exchange_name or 'binance').strip().lower()
+    return normalized or 'binance'
+
 def construct_context(ta_data, news, history, failures, macro_data):
     ta_summary = "Technical Indicators:\n"
     if ta_data is not None and not ta_data.empty:
@@ -103,9 +109,9 @@ def construct_context(ta_data, news, history, failures, macro_data):
         
     return ta_summary, news_summary, macro_summary, memory_section, mistakes_section
 
-def construct_prompt(symbol, price_data, ta_summary, news_summary, macro_summary, memory_section, mistakes_section):
+def construct_prompt(symbol, price_data, ta_summary, news_summary, macro_summary, memory_section, mistakes_section, exchange_name='binance'):
     prompt = f"""
-You are a professional crypto trading advisor. Analyze the following data for {symbol} and suggest a trading strategy.
+You are a professional crypto trading advisor. Analyze the following data for {symbol} on the {exchange_name.upper()} exchange and suggest a trading strategy.
 
 CONTEXT:
 Current Price: {price_data.get('current_price', 'N/A')}
@@ -142,20 +148,26 @@ OUTPUT FORMAT (JSON ONLY):
     return prompt
 
 
-def analyze_and_suggest(symbol):
+def analyze_and_suggest(symbol, exchange_name='binance'):
     """
     Main function to analyze a symbol and generate a strategy.
     """
-    logger.info(f"Starting analysis for {symbol}...")
+    exchange_name = normalize_exchange_name(exchange_name)
+    logger.info(f"Starting analysis for {symbol} on {exchange_name}...")
     
     # 1. Fetch Data
     try:
-        current_price = get_current_price(symbol)
-        klines = fetch_klines(symbol)
+        current_price = get_current_price(symbol, exchange_name=exchange_name)
+        klines = fetch_klines(symbol, exchange_name=exchange_name)
         
         if klines is None or klines.empty:
-            logger.error(f"Failed to fetch market data for {symbol}")
-            return {"error": f"Failed to fetch market data for {symbol}. Is it a valid Binance symbol? (e.g. SOLBTC instead of BTCSOL)"}
+            logger.error(f"Failed to fetch market data for {symbol} on {exchange_name}")
+            return {
+                "error": (
+                    f"Failed to fetch market data for {symbol} on {exchange_name}. "
+                    "Is it a valid symbol for that exchange?"
+                )
+            }
             
         # 2. Calculate TA
         ta_df = calculate_indicators(klines)
@@ -175,7 +187,14 @@ def analyze_and_suggest(symbol):
             ta_df, news, history, failures, macro_data
         )
         prompt = construct_prompt(
-            symbol, price_data, ta_summary, news_summary, macro_summary, memory_section, mistakes_section
+            symbol,
+            price_data,
+            ta_summary,
+            news_summary,
+            macro_summary,
+            memory_section,
+            mistakes_section,
+            exchange_name=exchange_name,
         )
         
         client = get_llm_client()
@@ -204,7 +223,8 @@ def analyze_and_suggest(symbol):
             'macro_summary': macro_summary,
             'memory_section': memory_section,
             'mistakes_section': mistakes_section,
-            'current_price': current_price
+            'current_price': current_price,
+            'exchange_name': exchange_name,
         }
         
         entry_price = strategy.get('entry') if strategy.get('entry') is not None else current_price

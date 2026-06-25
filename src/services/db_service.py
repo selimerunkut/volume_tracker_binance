@@ -116,6 +116,15 @@ def set_setting(key, value):
         conn.close()
 
 
+def get_chat_setting(chat_id, key, default=None):
+    return get_setting(f'chat:{chat_id}:{key}', default)
+
+
+def set_chat_setting(chat_id, key, value):
+    set_setting(f'chat:{chat_id}:{key}', value)
+    return value
+
+
 def save_suggestion(symbol, strategy_type, entry_price, take_profit, stop_loss, reasoning, analysis_data=None):
     """
     Save a new trade suggestion.

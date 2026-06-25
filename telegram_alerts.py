@@ -5,6 +5,8 @@ import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.services.db_service import get_setting
+from src.services.alert_preferences import get_alert_exchange_selection, should_send_alert_for_scope
+from src.services.volume_alerts import render_volume_alert_text
 
 # Load Telegram bot token and chat ID from credentials_b.json
 def load_telegram_credentials():
@@ -33,28 +35,15 @@ def send_telegram_message(alert_message, include_restrict_button=False, dry_run=
     chat_id = TELEGRAM_CHAT_ID
 
     symbol = alert_message['symbol']
-    curr_volume = int(alert_message['curr_volume']) # Format as integer
-    prev_volume_mean = int(alert_message['prev_volume_mean']) # Format as integer
-    level = alert_message['level']
-    chart_url = alert_message['chart_url']
-    binance_trade_url = alert_message['binance_trade_url']
-    last_2h_volume = int(alert_message['last_2h_volume']) # Format as integer
-    last_4h_volume = int(alert_message['last_4h_volume']) # Format as integer
-    last_1h_volume = int(alert_message['last_1h_volume']) # Format as integer
-    open_price = alert_message['open_price']
-    close_price = alert_message['close_price']
+    exchange = (alert_message.get('exchange') or 'BINANCE').upper()
+    selected_scope = get_alert_exchange_selection(chat_id)
+    if not should_send_alert_for_scope(exchange, selected_scope):
+        print(f"[{datetime.datetime.now()}] Skipping {exchange} alert for {symbol}; selected Telegram scope is {selected_scope}.")
+        return False
 
-    message_text = (
-        f"🚨 *Volume Alert - {symbol}* 🚨\n"
-        f"📊 Current Volume: {curr_volume:,}\n"
-        f"📈 Previous 6h Mean Volume: {prev_volume_mean:,}\n"
-        f"🕐 Last 1h Volume: {last_1h_volume:,}\n" # Add last 1h volume
-        f"🕒 Last 2h Volume: {last_2h_volume:,}\n"
-        f"🕓 Last 4h Volume: {last_4h_volume:,}\n"
-        f"💹 Last 1h Vol. candle Prices, Open: {open_price}, Close: {close_price}\n" # Open and close prices are now pre-formatted strings
-        f"🔥 Alert Level: *{level}*\n"
-        f"🔗 {chart_url}\n"
-        f"🔗 {binance_trade_url}"
+    message_text = render_volume_alert_text(
+        alert_message,
+        include_exchange=exchange != 'BINANCE',
     )
 
     url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'

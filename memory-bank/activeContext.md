@@ -10,6 +10,7 @@ This file tracks the project's current status, including recent changes, current
 *   Populating the Memory Bank files with project information.
 
 *   Implementation of the **AI Strategy Advisor** Telegram bot with LLM integration.
+*   Multi-exchange alert support with Binance/Kraken adapters and a universal Telegram exchange-scope menu.
 *   Added dynamic UI menu showing the last 5 analyzed symbols.
 *   Implemented robust symbol detection from plain text messages.
 *   Added typo feedback and shorthand commands (`/a`, `/anlayze`).
@@ -19,5 +20,6 @@ This file tracks the project's current status, including recent changes, current
 ## Open Questions/Issues
 
 *   **Binance API Geographical Restriction**: The script encounters `BinanceAPIException: APIError(code=0): Service unavailable from a restricted location` when run from certain IP addresses (e.g., DigitalOcean **USA** servers). Solution is to run the script from europena IP addresses
+*   **Kraken verification**: Public Kraken data paths should be revalidated whenever the adapter changes, especially for symbol naming and OHLC interval handling.
 *   **Systemd Service Monitoring**: While `Restart=always` is configured, continuous monitoring of `journalctl` logs is needed to ensure the service is consistently restarting and running as expected, especially after initial setup.
 [2025-08-06 14:09:00] - Implemented filtering for "bullish" volume in alerts.

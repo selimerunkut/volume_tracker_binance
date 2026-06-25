@@ -16,3 +16,9 @@
 -   Improved **error handling** for invalid symbols in `market_data_service.py` and `llm_strategy.py`.
 -   Fixed **NoneType crashes** and improved HTML/parsing stability.
 -   Updated **Documentation** (`AGENTS.md`) and **Memory Bank** files.
+
+## 2026-06-25
+
+-   Added a shared exchange registry with Binance and Kraken adapters.
+-   Added chat-scoped alert exchange selection with single, multiple, and all-exchange modes.
+-   Updated documentation to describe the modular multi-exchange alert flow and universal Telegram menu.

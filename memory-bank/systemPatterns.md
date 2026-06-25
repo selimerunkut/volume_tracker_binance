@@ -10,18 +10,21 @@ It is optional, but recommended to be updated as the project evolves.
 
 *   **Modular Scripting**: Core functionalities are separated into distinct Python files (`b_volume_alerts.py` for data/alerts, `telegram_alerts.py` for messaging, `alert_levels_tg.py` for logic).
 *   **Configuration Externalization**: Sensitive credentials (API keys, chat IDs) are stored in external JSON files (`credentials_b.json`, `credentials_telegram.json`) and excluded from version control via `.gitignore`.
+*   **Exchange Registry**: Supported exchanges are resolved through `src/exchanges/registry.py`, which keeps Telegram scope selection and the volume scanner decoupled from exchange-specific branching.
 *   **Error Handling**: Robust `try-except` blocks are used for external API calls (`requests.exceptions.RequestException`, `BinanceAPIException`) and data processing (`ValueError`) to ensure script resilience.
 *   **Logging**: Extensive `print` statements with timestamps are used for real-time progress tracking and debugging, which are then captured by `systemd`'s journal.
 *   **Data Formatting**: Numerical values (volumes) are formatted with thousand separators for readability in Telegram alerts.
-*   **URL Generation**: Dynamic generation of external links (TradingView, Binance trade) based on symbol for direct access from alerts.
+*   **URL Generation**: Dynamic generation of external links (TradingView and exchange trade links) based on symbol for direct access from alerts.
 *   **Telegram Robustness**: Universal use of `update.effective_message` to ensure handlers work across different Telegram update types (`message`, `callback_query`).
 *   **Interactive Input Fallbacks**: Using `MessageHandler` with pattern matching (regex or string property checks) to provide a "command-less" experience for common inputs like symbols.
 *   **Corrective UX**: Providing helpful hints instead of generic "error" messages (e.g., suggesting a valid symbol format when an API call fails with 400).
+*   **Chat-Scoped Preferences**: Exchange scope is stored per chat and normalized so a full selection collapses to `all`, keeping the selector stable as exchanges are added.
 
 ## Architectural Patterns
 
 *   **Client-Server Interaction**: The `b_volume_alerts.py` script acts as a client interacting with the Binance API to fetch market data.
 *   **Messaging Service Integration**: The `telegram_alerts.py` module integrates with the Telegram Bot API to send notifications, acting as a messaging client.
+*   **Exchange Abstraction**: Binance and Kraken are implemented as adapters behind a shared registry, allowing the menu and scanner to stay universal.
 *   **Stateful Analysis**: Using SQLite (`db_service.py`) to track analysis history and feed it back into both the AI prompt (for learning) and the UI (for dynamic menus).
 *   **Service Management**: `systemd` is employed as the primary service manager on Linux systems, ensuring the script runs continuously in the background, restarts automatically on exit, and provides centralized logging.
 *   **Dependency Management**: `uv` and `pyproject.toml` define and manage project dependencies, ensuring a consistent and isolated environment.
@@ -31,3 +34,4 @@ It is optional, but recommended to be updated as the project evolves.
 *   **Unit Testing (Implicit)**: Individual functions (e.g., `send_telegram_message` in `telegram_alerts.py`) include `if __name__ == "__main__":` blocks for standalone testing.
 *   **Integration Testing**: The `run_script()` function in `b_volume_alerts.py` can be executed once immediately for quick end-to-end testing of data fetching, alert generation, and Telegram message sending.
 *   **Service Behavior Testing**: `systemd`'s `Restart=always` behavior is tested by observing service restarts via `journalctl` after the script completes a single run. Temporary code modifications (e.g., limiting loop iterations) were used to speed up this testing.
+*   **Exchange Adapter Testing**: Public-data adapters should be checked with focused scripts before enabling new exchanges or changing symbol/interval assumptions.

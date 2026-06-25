@@ -19,14 +19,17 @@ This file tracks the project's progress using a task list format.
 *   Added dynamic UI menus and robust "command-less" symbol analysis.
 *   Improved error handling and corrective feedback for invalid Binance symbols.
 *   Fixed multiple bot stability and parsing issues.
+*   Added multi-exchange alert support with Binance/Kraken adapters and chat-scoped exchange selection.
 
 ## Current Tasks
 
 *   Populating the Memory Bank files with comprehensive project information.
+*   Keeping documentation aligned with the universal exchange menu and future exchange extensibility.
 
 ## Next Steps
 
 *   Address Binance API geographical restriction (if user provides proxy details).
 *   Continue monitoring `systemd` service logs for long-term stability.
+*   Verify Kraken public-data assumptions whenever the adapter changes.
 *   Further enhancements to alert logic or features as requested.
 [2025-08-06 14:09:00] - Implemented bullish volume filtering.

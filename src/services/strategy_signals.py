@@ -82,7 +82,7 @@ def describe_hourly_signal(df, signal):
 
 
 def describe_daily_signal(df, signal):
-    if signal not in {'LONG', 'SHORT'} or df is None or len(df) < 2:
+    if signal not in {'LONG', 'SHORT', 'WAIT'} or df is None or len(df) < 2:
         return None
 
     latest = df.iloc[-1]
@@ -104,6 +104,15 @@ def describe_daily_signal(df, signal):
     if signal == 'SHORT':
         return (
             "Rule: Daily close crossed below SMA(12), suggesting momentum is turning bearish.\n"
+            f"Current Close: {_format_value(current_close)}\n"
+            f"Previous Close: {_format_value(prev_close)}\n"
+            f"SMA(12): {_format_value(sma_12)}\n"
+            f"Prev SMA(12): {_format_value(prev_sma_12)}"
+        )
+
+    if signal == 'WAIT':
+        return (
+            "Rule: Daily close has not crossed SMA(12) yet, so the strategy stays in WAIT.\n"
             f"Current Close: {_format_value(current_close)}\n"
             f"Previous Close: {_format_value(prev_close)}\n"
             f"SMA(12): {_format_value(sma_12)}\n"
