@@ -1,14 +1,10 @@
+from src.services.volume_alerts import generate_tradingview_url
+
+
 def get_volume_alert_details(curr_volume, prev_volume_mean, last_completed_hour_volume, open_price, close_price, symbol, interval, exchange):
     details = []
-    base_url = {
-        "KUCOIN": "https://www.tradingview.com/chart/?symbol=KUCOIN:",
-        "BINANCE": "https://www.tradingview.com/chart/?symbol=BINANCE:"
-    }
-
-    if exchange.upper() not in base_url:
-        raise ValueError(f"Exchange {exchange} not supported.")
-
-    chart_url = f"{base_url[exchange.upper()]}{symbol}&interval={interval}"
+    exchange_name = (exchange or '').upper()
+    chart_url = f"{generate_tradingview_url(symbol, exchange_name)}&interval={interval}"
 
     # New condition: current volume must also be greater than the last completed hour's volume
     if close_price > open_price and curr_volume > last_completed_hour_volume and curr_volume > prev_volume_mean * 15:
