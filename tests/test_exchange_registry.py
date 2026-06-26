@@ -7,14 +7,15 @@ from src.exchanges.registry import get_exchange, get_exchanges_for_scope, get_su
 
 
 def test_registry_lists_supported_exchanges():
-    assert get_supported_exchange_names() == ['binance', 'kraken']
+    assert get_supported_exchange_names() == ['binance', 'kraken', 'okx']
 
 
 def test_registry_resolves_scope_variants():
     assert [exchange.name for exchange in get_exchanges_for_scope('binance')] == ['binance']
-    assert [exchange.name for exchange in get_exchanges_for_scope('all')] == ['binance', 'kraken']
+    assert [exchange.name for exchange in get_exchanges_for_scope('all')] == ['binance', 'kraken', 'okx']
     assert [exchange.name for exchange in get_exchanges_for_scope({'mode': 'selected', 'exchanges': ['kraken', 'binance']})] == ['kraken', 'binance']
     assert [exchange.name for exchange in get_exchanges_for_scope('coinbase')] == ['binance']
+    assert [exchange.name for exchange in get_exchanges_for_scope('okx')] == ['okx']
 
 
 def test_get_exchange_rejects_unknown_names():

@@ -35,9 +35,10 @@ def _kraken_trade_slug(symbol):
 class KrakenExchange:
     name = 'kraken'
     display_name = 'KRAKEN'
+    request_timeout = 10
 
     def _asset_pairs(self):
-        response = requests.get('https://api.kraken.com/0/public/AssetPairs')
+        response = requests.get('https://api.kraken.com/0/public/AssetPairs', timeout=self.request_timeout)
         response.raise_for_status()
         result = response.json()['result']
         pairs = []
@@ -64,7 +65,7 @@ class KrakenExchange:
         url = f'https://api.kraken.com/0/public/OHLC?pair={symbol}&interval={kraken_interval}'
         try:
             print(f"[{datetime.datetime.now()}] Fetching data for {symbol} on Kraken...")
-            response = requests.get(url)
+            response = requests.get(url, timeout=self.request_timeout)
             response.raise_for_status()
             payload = response.json()['result']
             pair_key = next(key for key in payload.keys() if key != 'last')
@@ -83,7 +84,7 @@ class KrakenExchange:
     def get_current_price(self, symbol):
         url = f'https://api.kraken.com/0/public/Ticker?pair={symbol}'
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=self.request_timeout)
             response.raise_for_status()
             payload = response.json()['result']
             pair_key = next(iter(payload.keys()))

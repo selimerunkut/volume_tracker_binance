@@ -86,8 +86,8 @@ def test_alerts_scope_command_supports_all_single_and_multiple(monkeypatch):
 
     asyncio.run(telegram_bot_handler.alerts_scope_command(update, context))
 
-    assert state['selection'] == {'mode': 'all', 'exchanges': []}
-    assert update.effective_message.calls[-1]['text'].startswith('🌍 Current alert scope:')
+    assert state['selection'] == {'mode': 'selected', 'exchanges': ['binance', 'kraken']}
+    assert update.effective_message.calls[-1]['text'].startswith('🗂 Current alert scope:')
     keyboard = update.effective_message.calls[-1]['reply_markup'].inline_keyboard
     assert any('All exchanges' in button.text for row in keyboard for button in row)
 

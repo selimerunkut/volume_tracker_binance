@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from .binance import BinanceExchange
 from .kraken import KrakenExchange
+from .okx import OKXExchange
 
 _EXCHANGES = {
     'binance': BinanceExchange,
     'kraken': KrakenExchange,
+    'okx': OKXExchange,
 }
 
 

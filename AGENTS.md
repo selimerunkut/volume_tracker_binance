@@ -89,6 +89,7 @@ except Exception as e:
 - No formal test framework configured
 - Use `if __name__ == "__main__":` blocks for standalone testing
 - Tests directory exists but is empty
+- In this repo, "e2e tests" means tests that hit real live APIs/endpoints; mocked network tests are regression or integration tests, not e2e.
 
 /Users/semacair/dev/agent_system/roo_task_feb-20-2026_9-50-58-pm.md
 

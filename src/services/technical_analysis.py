@@ -1,7 +1,16 @@
 """
 Technical Analysis Service - Calculates indicators using pandas-ta
 """
+import warnings
+
 import pandas as pd
+
+warnings.filterwarnings(
+    'ignore',
+    message="The 'mode.copy_on_write' option is deprecated.*",
+    category=Warning,
+)
+
 import pandas_ta as ta
 
 

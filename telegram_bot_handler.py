@@ -342,7 +342,7 @@ def render_alert_scope_message(selection, view='root'):
 
     return (
         f"{summary}\n\n"
-        "Choose how Telegram alerts should be routed. You can keep Binance-only behavior, add Kraken, or select all supported exchanges."
+        "Choose how Telegram alerts should be routed. You can keep one exchange selected, add more supported exchanges, or select all supported exchanges."
     )
 
 
@@ -442,7 +442,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/history - Show trading performance stats\n"
         "/alerts - Toggle volume alerts on/off\n"
         "/alerts_scope [all|single <exchange>|multiple <exchanges...>] - Set alert exchanges\n"
-        "\nNote: /analyze, /watch, /unwatch, and /list_watch will ask you to choose Binance, Kraken, or all exchanges before proceeding.\n"
+        "\nNote: /analyze, /watch, /unwatch, and /list_watch will ask you to choose a supported exchange or all exchanges before proceeding.\n"
     )
     markup = await get_main_menu_markup()
     await update.effective_message.reply_text(help_text, reply_markup=markup)

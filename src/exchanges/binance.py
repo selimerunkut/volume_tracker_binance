@@ -43,12 +43,13 @@ def _build_klines_df(data):
 class BinanceExchange:
     name = 'binance'
     display_name = 'BINANCE'
+    request_timeout = 10
 
     def fetch_klines(self, symbol, interval='1h', limit=100):
         url = f'https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}'
         try:
             print(f"[{datetime.datetime.now()}] Fetching data for {symbol} on Binance...")
-            response = requests.get(url)
+            response = requests.get(url, timeout=self.request_timeout)
             if response.status_code == 400:
                 print(f"[{datetime.datetime.now()}] Invalid symbol or parameter error for {symbol} (HTTP 400)")
                 return pd.DataFrame()
@@ -61,7 +62,7 @@ class BinanceExchange:
     def get_current_price(self, symbol):
         url = f'https://api.binance.com/api/v3/ticker/price?symbol={symbol}'
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=self.request_timeout)
             if response.status_code == 400:
                 return None
             response.raise_for_status()
@@ -76,7 +77,7 @@ class BinanceExchange:
 
         url = f'https://api.binance.com/api/v3/ticker/price?symbol={symbol}'
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=self.request_timeout)
             if response.status_code == 400:
                 return False, "invalid_symbol"
             response.raise_for_status()
@@ -86,7 +87,7 @@ class BinanceExchange:
 
     def list_symbols(self, quote_asset=None):
         url = 'https://api.binance.com/api/v3/exchangeInfo'
-        response = requests.get(url)
+        response = requests.get(url, timeout=self.request_timeout)
         response.raise_for_status()
         symbols = response.json()['symbols']
 

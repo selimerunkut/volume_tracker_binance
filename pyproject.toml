@@ -20,3 +20,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["b_volume_alerts", "telegram_alerts"]
+
+[tool.pytest.ini_options]
+markers = [
+    "e2e: live end-to-end tests that hit public exchange APIs",
+]

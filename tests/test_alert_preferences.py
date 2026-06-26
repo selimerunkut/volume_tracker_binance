@@ -27,7 +27,9 @@ def test_alert_selection_defaults_and_normalization():
     assert normalize_alert_exchange_selection(None) == {'mode': 'all', 'exchanges': []}
     assert normalize_alert_exchange_selection('all') == {'mode': 'all', 'exchanges': []}
     assert normalize_alert_exchange_selection('kraken') == {'mode': 'selected', 'exchanges': ['kraken']}
-    assert normalize_alert_exchange_selection(['binance', 'kraken', 'binance']) == {'mode': 'all', 'exchanges': []}
+    assert normalize_alert_exchange_selection('okx') == {'mode': 'selected', 'exchanges': ['okx']}
+    assert normalize_alert_exchange_selection(['binance', 'kraken', 'binance']) == {'mode': 'selected', 'exchanges': ['binance', 'kraken']}
+    assert normalize_alert_exchange_selection(['binance', 'kraken', 'okx']) == {'mode': 'all', 'exchanges': []}
     assert normalize_alert_exchange_selection('coinbase') == {'mode': 'all', 'exchanges': []}
 
 
@@ -51,7 +53,9 @@ def test_alert_exchange_selection_round_trip():
         assert get_alert_exchange_selection('123') == {'mode': 'all', 'exchanges': []}
         assert set_alert_exchange_selection('123', 'kraken') == {'mode': 'selected', 'exchanges': ['kraken']}
         assert get_alert_exchange_selection('123') == {'mode': 'selected', 'exchanges': ['kraken']}
-        assert set_alert_exchange_selection('123', ['binance', 'kraken']) == {'mode': 'all', 'exchanges': []}
+        assert set_alert_exchange_selection('123', ['binance', 'kraken']) == {'mode': 'selected', 'exchanges': ['binance', 'kraken']}
+        assert get_alert_exchange_selection('123') == {'mode': 'selected', 'exchanges': ['binance', 'kraken']}
+        assert set_alert_exchange_selection('123', ['binance', 'kraken', 'okx']) == {'mode': 'all', 'exchanges': []}
         assert get_alert_exchange_selection('123') == {'mode': 'all', 'exchanges': []}
         assert set_alert_exchange_selection('123', 'all') == {'mode': 'all', 'exchanges': []}
         assert get_alert_exchange_selection('123') == {'mode': 'all', 'exchanges': []}

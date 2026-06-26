@@ -39,6 +39,7 @@ class BinancePermissionsService:
         self._last_refresh = 0
         self._trading_group = None
         self._last_error = None
+        self.request_timeout = 10
 
     def _has_credentials(self) -> bool:
         return bool(self.api_key and self.api_secret)
@@ -68,7 +69,7 @@ class BinancePermissionsService:
 
         try:
             params_for_request = request_params if request_params else None
-            response = requests.get(url, headers=headers, params=params_for_request)
+            response = requests.get(url, headers=headers, params=params_for_request, timeout=self.request_timeout)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as exc:

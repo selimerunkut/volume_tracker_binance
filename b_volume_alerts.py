@@ -90,6 +90,8 @@ def save_alert_state(timestamps):
 
 def get_scan_quote_assets(exchange_name):
     exchange_name = (exchange_name or '').lower()
+    if exchange_name == 'okx':
+        return ['USDC', 'EUR', 'USD', 'BTC']
     if exchange_name == 'kraken':
         return ['USD', 'BTC']
     return ['USDC', 'BTC']

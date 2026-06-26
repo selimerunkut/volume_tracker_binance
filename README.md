@@ -96,6 +96,11 @@ This project tracks cryptocurrency volume on Binance and Kraken and sends alerts
 
     **Quick Start (Development):**
     ```bash
+    # Recommended before local testing: stop the bot services on bagent/server
+    # so Telegram does not receive duplicate updates from two running copies.
+    # Example:
+    #   ssh bagent 'sudo systemctl stop binance-strategy-bot.service binance-volume-tracker.service'
+
     # Terminal 1: Start the Telegram bot (includes all AI features)
     .venv/bin/python telegram_bot_handler.py
     
