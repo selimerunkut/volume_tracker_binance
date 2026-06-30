@@ -6,17 +6,18 @@ if ! command -v systemctl >/dev/null 2>&1; then
   exit 1
 fi
 
-if command -v uv >/dev/null 2>&1; then
-  uv sync
-elif [ -x .venv/bin/uv ]; then
-  .venv/bin/uv sync
-elif [ -x .venv/bin/python ]; then
-  echo "uv is not installed; skipping dependency sync and using the existing .venv"
-else
-  echo "No uv command or .venv found"
-  exit 1
+if ! command -v uv >/dev/null 2>&1; then
+  if command -v curl >/dev/null 2>&1; then
+    echo "uv is not installed; bootstrapping it"
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+  else
+    echo "uv is not installed and curl is unavailable"
+    exit 1
+  fi
 fi
 
+uv sync
 systemctl restart binance-strategy-bot.service
 systemctl restart binance-volume-tracker.service
 systemctl status binance-strategy-bot.service

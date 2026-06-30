@@ -302,7 +302,7 @@ To automatically run this after every `git pull`, install the post-merge hook on
 ./scripts/install_post_merge_hook.sh
 ```
 
-The hook runs `uv sync` when available, otherwise it uses the existing `.venv`, then restarts both systemd services after each merge/pull.
+The hook runs `uv sync`, bootstrapping `uv` on the server if needed, then restarts both systemd services after each merge/pull.
 
 ## Project Structure
 
