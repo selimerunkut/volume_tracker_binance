@@ -152,7 +152,9 @@ if [ "$RUN_PYTHON_DEPS" = true ]; then
     cd "$INSTALL_DIR"
     echo "Working in: $(pwd)"
     
-    "$UV_BIN" venv
+    if [ ! -d ".venv" ]; then
+        "$UV_BIN" venv
+    fi
     source .venv/bin/activate
     echo "Virtual environment activated."
     "$UV_BIN" python install
