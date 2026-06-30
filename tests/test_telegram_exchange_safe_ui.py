@@ -118,11 +118,39 @@ def test_menu_analyze_pair_button_defaults_to_all_exchanges_without_scope_picker
 
     asyncio.run(telegram_bot_handler.menu_callback(update, context))
 
-    texts = [call.get('text', '') for call in update.callback_query.calls]
+    texts = [call.get('text', '') for call in update.effective_message.calls]
     assert all('Choose the exchange scope' not in text for text in texts)
     assert analyzed == [('BABYDOGE-EUR', 'binance'), ('BABYDOGE-EUR', 'kraken')]
     assert 'BINANCE strategy for BABYDOGE-EUR' in texts[-1]
     assert 'KRAKEN strategy for BABYDOGE-EUR' in texts[-1]
+
+
+def test_menu_analyze_pair_button_keeps_original_alert_message_visible(monkeypatch):
+    analyzed = []
+
+    monkeypatch.setattr(telegram_bot_handler, 'get_supported_exchange_names', lambda: ['binance'])
+    monkeypatch.setattr(telegram_bot_handler, 'get_setting', lambda key, default=None: default)
+    monkeypatch.setattr(telegram_bot_handler, 'validate_trading_pair', lambda symbol, exchange_name='binance': (True, None))
+
+    async def fake_analyze_and_suggest(symbol, exchange_name='binance'):
+        analyzed.append((symbol, exchange_name))
+        return {
+            'action': 'WAIT',
+            'confidence': 88,
+            'reasoning': 'ok',
+        }
+
+    monkeypatch.setattr(telegram_bot_handler, 'analyze_and_suggest', fake_analyze_and_suggest)
+
+    update = _make_update(callback_data='menu_analyze_STEEMUSDC')
+    context = SimpleNamespace(user_data={}, args=[])
+
+    asyncio.run(telegram_bot_handler.menu_callback(update, context))
+
+    assert analyzed == [('STEEMUSDC', 'binance')]
+    assert not any(call.get('action') == 'edit_message_text' for call in update.callback_query.calls)
+    assert any('Analyzing STEEMUSDC on BINANCE' in call.get('text', '') for call in update.effective_message.calls)
+    assert any('BINANCE strategy for STEEMUSDC' in call.get('text', '') for call in update.effective_message.calls)
 
 
 def test_menu_analyze_pair_button_can_preserve_existing_scope_picker(monkeypatch):

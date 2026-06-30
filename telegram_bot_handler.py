@@ -695,7 +695,7 @@ async def debug_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
     elif update.callback_query:
         logger.info(f"DEBUG: Received callback query from {update.effective_user.username}: {update.callback_query.data}")
 
-async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str | None = None, exchange_scope=None) -> None:
+async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str | None = None, exchange_scope=None, preserve_source_message: bool = False) -> None:
     """Analyzes a symbol using AI strategy."""
     logger.info(f"DEBUG: analyze_symbol reached with args: {getattr(context, 'args', [])}")
     ask_mode = False
@@ -737,8 +737,11 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
     logger.info(f"DEBUG: Processing analysis for symbol: {symbol} on {exchanges}")
     progress_text = f"🔍 Analyzing {symbol} on {format_exchange_names(exchanges)}... This may take a moment."
     if update.callback_query:
-        status_editor = update.callback_query
-        await safe_edit_message_text(status_editor, progress_text)
+        if preserve_source_message:
+            status_editor = await update.effective_message.reply_text(progress_text)
+        else:
+            status_editor = update.callback_query
+            await safe_edit_message_text(status_editor, progress_text)
     else:
         status_editor = await update.effective_message.reply_text(progress_text)
 
@@ -807,14 +810,20 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
 
         if not responses:
             if update.callback_query:
-                await safe_edit_message_text(status_editor, f"❌ Failed to analyze {symbol}. Check logs or try again.")
+                if preserve_source_message:
+                    await status_editor.edit_text(f"❌ Failed to analyze {symbol}. Check logs or try again.")
+                else:
+                    await safe_edit_message_text(status_editor, f"❌ Failed to analyze {symbol}. Check logs or try again.")
             else:
                 await status_editor.edit_text(f"❌ Failed to analyze {symbol}. Check logs or try again.")
             clear_pending_flow(context)
             return
 
         if update.callback_query:
-            await safe_edit_message_text(status_editor, "\n\n".join(responses), parse_mode='HTML', reply_markup=reply_markup)
+            if preserve_source_message:
+                await status_editor.edit_text("\n\n".join(responses), parse_mode='HTML', reply_markup=reply_markup)
+            else:
+                await safe_edit_message_text(status_editor, "\n\n".join(responses), parse_mode='HTML', reply_markup=reply_markup)
         else:
             await status_editor.edit_text("\n\n".join(responses), parse_mode='HTML', reply_markup=reply_markup)
         clear_pending_flow(context)
@@ -1149,7 +1158,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if mode == 'ask':
             await prompt_scoped_flow(update, context, 'analyze', symbol=symbol)
         else:
-            await analyze_symbol(update, context, symbol=symbol, exchange_scope='all')
+            await analyze_symbol(update, context, symbol=symbol, exchange_scope='all', preserve_source_message=True)
     elif data == "menu_history":
         context.args = [] # Clear args for show_history
         await show_history(update, context)
