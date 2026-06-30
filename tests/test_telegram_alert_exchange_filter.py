@@ -84,6 +84,44 @@ def test_send_telegram_message_allows_selected_exchange():
             os.unlink(temp_db)
 
 
+def test_volume_alert_restrict_keyboard_also_reuses_analyze_callback():
+    temp_db = _prepare_temp_db()
+    try:
+        telegram_alerts, _ = _load_telegram_alerts_module()
+        telegram_alerts.get_alert_exchange_selection = lambda chat_id: {'mode': 'all', 'exchanges': []}
+
+        captured_payload = {}
+
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"ok": True}
+
+        def fake_post(url, json):
+            captured_payload.update(json)
+            return FakeResponse()
+
+        telegram_alerts.requests.post = fake_post
+
+        assert telegram_alerts.send_telegram_message(
+            _sample_alert('BINANCE'),
+            include_restrict_button=True,
+            dry_run=False,
+        ) is True
+
+        reply_markup = json.loads(captured_payload['reply_markup'])
+        keyboard = reply_markup['inline_keyboard']
+        assert keyboard == [
+            [{'text': 'Restrict BTCUSDC', 'callback_data': 'restrict_BTCUSDC'}],
+            [{'text': '🔍 Analyze BTCUSDC', 'callback_data': 'menu_analyze_BTCUSDC'}],
+        ]
+    finally:
+        if os.path.exists(temp_db):
+            os.unlink(temp_db)
+
+
 def test_should_deliver_exchange_alert_matches_scope():
     temp_db = _prepare_temp_db()
     try:

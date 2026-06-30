@@ -56,7 +56,10 @@ def send_telegram_message(alert_message, include_restrict_button=False, dry_run=
     }
 
     if include_restrict_button and symbol:
-        keyboard = [[InlineKeyboardButton(f"Restrict {symbol}", callback_data=f"restrict_{symbol}")]]
+        keyboard = [
+            [InlineKeyboardButton(f"Restrict {symbol}", callback_data=f"restrict_{symbol}")],
+            [InlineKeyboardButton(f"🔍 Analyze {symbol}", callback_data=f"menu_analyze_{symbol}")],
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard).to_json()
         payload['reply_markup'] = reply_markup
     
