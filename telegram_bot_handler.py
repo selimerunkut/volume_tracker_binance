@@ -52,6 +52,10 @@ symbol_manager = SymbolManager()
 watchlist_manager = WatchlistManager()
 signal_service = SignalService(chat_id=TELEGRAM_CHAT_ID, watchlist_manager=watchlist_manager)
 
+PAIR_BUTTON_ANALYSIS_MODE_KEY = "pair_button_analysis_mode"
+PAIR_BUTTON_ANALYSIS_MODE_DEFAULT = "all"
+PAIR_BUTTON_ANALYSIS_MODES = {"all", "ask"}
+
 # Initialize DB
 init_db()
 
@@ -275,6 +279,36 @@ def format_exchange_names(exchange_names):
     return ", ".join(name.upper() for name in exchange_names)
 
 
+def get_pair_button_analysis_mode():
+    raw_mode = get_setting(PAIR_BUTTON_ANALYSIS_MODE_KEY, PAIR_BUTTON_ANALYSIS_MODE_DEFAULT)
+    mode = str(raw_mode or PAIR_BUTTON_ANALYSIS_MODE_DEFAULT).strip().lower()
+    if mode in PAIR_BUTTON_ANALYSIS_MODES:
+        return mode
+    return PAIR_BUTTON_ANALYSIS_MODE_DEFAULT
+
+
+def format_pair_unavailable_message(symbol, exchange_name, reason=None):
+    symbol_text = html.escape(str(symbol).upper())
+    exchange_text = html.escape(str(exchange_name).upper())
+    reason_text = str(reason or '').lower()
+
+    if any(term in reason_text for term in ('permission', 'permitted', 'restricted', 'forbidden')):
+        return f"{exchange_text}: {symbol_text} is not available for this account or trading group."
+
+    if not reason_text or any(term in reason_text for term in ('invalid', 'not_found', 'not found', 'not_listed', 'not listed')):
+        return f"{exchange_text}: {symbol_text} is not listed on this exchange."
+
+    return f"{exchange_text}: {symbol_text} could not be found on this exchange."
+
+
+def format_analysis_error_message(symbol, exchange_name, error_text):
+    normalized_error = str(error_text or '').lower()
+    if 'failed to fetch market data' in normalized_error or 'valid symbol for that exchange' in normalized_error:
+        return format_pair_unavailable_message(symbol, exchange_name, 'invalid_symbol')
+    exchange_text = html.escape(str(exchange_name).upper())
+    return f"{exchange_text}: analysis could not be completed right now."
+
+
 def get_alert_scope_summary(selection):
     normalized = normalize_alert_exchange_selection(selection)
     if normalized['mode'] == 'all':
@@ -442,7 +476,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/history - Show trading performance stats\n"
         "/alerts - Toggle volume alerts on/off\n"
         "/alerts_scope [all|single <exchange>|multiple <exchanges...>] - Set alert exchanges\n"
-        "\nNote: /analyze, /watch, /unwatch, and /list_watch will ask you to choose a supported exchange or all exchanges before proceeding.\n"
+        "\nNote: /analyze defaults to all exchanges; /watch, /unwatch, and /list_watch will ask you to choose a supported exchange or all exchanges before proceeding.\n"
     )
     markup = await get_main_menu_markup()
     await update.effective_message.reply_text(help_text, reply_markup=markup)
@@ -664,8 +698,19 @@ async def debug_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
 async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str | None = None, exchange_scope=None) -> None:
     """Analyzes a symbol using AI strategy."""
     logger.info(f"DEBUG: analyze_symbol reached with args: {getattr(context, 'args', [])}")
+    ask_mode = False
+    raw_args = list(getattr(context, 'args', []) or [])
+    if symbol is None and raw_args:
+        filtered_args = []
+        for arg in raw_args:
+            if str(arg).strip().lower() == 'ask':
+                ask_mode = True
+            else:
+                filtered_args.append(arg)
+        raw_args = filtered_args
+
     if symbol is None and context.args:
-        symbol = context.args[0].upper()
+        symbol = raw_args[0].upper() if raw_args else None
     elif symbol is not None:
         symbol = symbol.upper()
     else:
@@ -673,6 +718,8 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
 
     pending_scope = exchange_scope if exchange_scope is not None else get_pending_scope_raw(context)
     if pending_scope is None:
+        pending_scope = 'all'
+    if ask_mode and exchange_scope is None and symbol:
         await prompt_scoped_flow(update, context, 'analyze', symbol=symbol)
         return
     if not symbol:
@@ -699,25 +746,45 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
         responses = []
         reply_markup = None
         for exchange_name in exchanges:
+            try:
+                validation_candidate = await asyncio.to_thread(validate_trading_pair, symbol, exchange_name=exchange_name)
+                if inspect.isawaitable(validation_candidate):
+                    validation_candidate = await validation_candidate
+                is_valid, validation_reason = validation_candidate
+            except Exception as validation_error:
+                logger.warning(
+                    "Validation failed for %s on %s: %s",
+                    symbol,
+                    exchange_name,
+                    validation_error,
+                )
+                responses.append(format_pair_unavailable_message(symbol, exchange_name, 'validation_failed'))
+                continue
+
+            if not is_valid:
+                responses.append(format_pair_unavailable_message(symbol, exchange_name, validation_reason))
+                continue
+
             strategy_candidate = await asyncio.to_thread(analyze_and_suggest, symbol, exchange_name=exchange_name)
             if inspect.isawaitable(strategy_candidate):
                 strategy = await strategy_candidate
             else:
                 strategy = strategy_candidate
             if not strategy:
-                responses.append(f"{exchange_name.upper()}: failed to analyze")
+                responses.append(format_analysis_error_message(symbol, exchange_name, None))
                 continue
 
             if "error" in strategy:
-                responses.append(f"{exchange_name.upper()}: error - {html.escape(str(strategy['error']))}")
+                responses.append(format_analysis_error_message(symbol, exchange_name, strategy['error']))
                 continue
 
             action = html.escape(str(strategy.get('action', 'N/A')))
             confidence = strategy.get('confidence', 0)
             reasoning = html.escape(str(strategy.get('reasoning', 'N/A')))
+            symbol_text = html.escape(str(symbol))
 
             response = (
-                f"🤖 <b>{exchange_name.upper()} strategy for {symbol}</b>\n\n"
+                f"🤖 <b>{html.escape(exchange_name.upper())} strategy for {symbol_text}</b>\n\n"
                 f"<b>Action</b>: {action} "
                 f"(Confidence: {confidence}%)\n"
             )
@@ -1078,7 +1145,11 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     data = query.data
     if data.startswith("menu_analyze_"):
         symbol = data.replace("menu_analyze_", "")
-        await prompt_scoped_flow(update, context, 'analyze', symbol=symbol)
+        mode = await asyncio.to_thread(get_pair_button_analysis_mode)
+        if mode == 'ask':
+            await prompt_scoped_flow(update, context, 'analyze', symbol=symbol)
+        else:
+            await analyze_symbol(update, context, symbol=symbol, exchange_scope='all')
     elif data == "menu_history":
         context.args = [] # Clear args for show_history
         await show_history(update, context)
