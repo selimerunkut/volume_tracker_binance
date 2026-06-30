@@ -22,3 +22,9 @@
 -   Added a shared exchange registry with Binance and Kraken adapters.
 -   Added chat-scoped alert exchange selection with single, multiple, and all-exchange modes.
 -   Updated documentation to describe the modular multi-exchange alert flow and universal Telegram menu.
+
+## 2026-06-30
+
+-   Replaced `/analyze` LLM orchestration with a deterministic, exchange-specific strategy advisor.
+-   Added clickable informational news links to analysis details without letting news affect the signal.
+-   Made performance tracking use the stored exchange when evaluating each suggestion.

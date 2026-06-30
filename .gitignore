@@ -24,3 +24,6 @@ volume.log
 
 # Local runtime state
 signal_watchlist.json
+
+# Hide stale ultragoal artifacts from Codex view
+.omx/ultragoal/

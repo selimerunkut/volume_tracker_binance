@@ -14,7 +14,7 @@ from src.services.watchlist_manager import WatchlistManager
 # pyright: reportOptionalMemberAccess=false,reportAttributeAccessIssue=false,reportArgumentType=false
 
 # Import services
-from src.services.llm_strategy import analyze_and_suggest
+from src.services.strategy_advisor import analyze_and_suggest
 from src.services.performance_tracker import track_performance
 from src.services.db_service import get_performance_stats, init_db, get_suggestion_details, get_setting, set_setting
 from src.services.db_service import get_suggestions_between_dates, get_last_analyzed_symbols
@@ -277,6 +277,79 @@ async def complete_scoped_flow(update: Update, context: ContextTypes.DEFAULT_TYP
 
 def format_exchange_names(exchange_names):
     return ", ".join(name.upper() for name in exchange_names)
+
+
+def format_indicator_value(value):
+    if value is None:
+        return "N/A"
+    if isinstance(value, (int, float)):
+        return f"{value:.2f}"
+    return html.escape(str(value))
+
+
+def format_indicator_details(indicators):
+    indicators = indicators or {}
+    lines = []
+    label_map = [
+        ("rsi", "RSI"),
+        ("macd", "MACD"),
+        ("macd_signal", "MACD Signal"),
+        ("ema_50", "EMA 50"),
+        ("ema_200", "EMA 200"),
+        ("bb_lower", "Bollinger Lower"),
+        ("bb_middle", "Bollinger Middle"),
+        ("bb_upper", "Bollinger Upper"),
+    ]
+    for key, label in label_map:
+        if key in indicators:
+            lines.append(f"• <b>{label}</b>: {format_indicator_value(indicators.get(key))}")
+    return "\n".join(lines) if lines else "N/A"
+
+
+def format_news_items_html(news_items):
+    items = news_items or []
+    if not items:
+        return "N/A"
+
+    lines = []
+    for item in items:
+        title = html.escape(str(item.get('title', 'Untitled')))
+        source = html.escape(str(item.get('source', 'Unknown source')))
+        url = item.get('url')
+        if isinstance(url, str) and url.startswith(("http://", "https://")):
+            safe_url = html.escape(str(url), quote=True)
+            title_html = f'<a href="{safe_url}">{title}</a>'
+        else:
+            title_html = title
+        lines.append(f"• {title_html} <i>({source})</i>")
+    return "\n".join(lines)
+
+
+def format_analysis_details_message(details):
+    data = details.get('analysis_data') or {}
+    symbol = html.escape(str(details.get('symbol', 'N/A')).upper())
+    exchange_name = html.escape(str(data.get('exchange_name', 'binance')).upper())
+    action = html.escape(str(data.get('action', details.get('strategy_type', 'N/A'))).upper())
+    confidence = data.get('confidence', details.get('confidence'))
+    score = data.get('score', 'N/A')
+    rule_ids = data.get('rule_ids') or []
+    rule_ids_text = ", ".join(html.escape(str(rule_id)) for rule_id in rule_ids) or "N/A"
+    indicators_html = format_indicator_details(data.get('indicators'))
+    news_html = format_news_items_html(data.get('news_items'))
+    reasoning = html.escape(str(details.get('reasoning', 'N/A')))
+
+    message = (
+        f"📜 <b>{exchange_name} analysis details for {symbol}</b>\n\n"
+        f"<b>Action</b>: {action}\n"
+        f"<b>Confidence</b>: {confidence if confidence is not None else 'N/A'}%\n"
+        f"<b>Deterministic score</b>: {score}\n"
+        f"<b>Triggered rules</b>: {rule_ids_text}\n\n"
+        f"<b>Entry / TP / SL</b>: {format_indicator_value(data.get('entry'))} / {format_indicator_value(data.get('tp'))} / {format_indicator_value(data.get('sl'))}\n\n"
+        f"<b>Technical indicators</b>:\n{indicators_html}\n\n"
+        f"<b>Reasoning</b>:\n{reasoning}\n\n"
+        f"<b>Informational news — not used in the signal</b>:\n{news_html}"
+    )
+    return message
 
 
 def get_pair_button_analysis_mode():
@@ -747,7 +820,7 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
 
     try:
         responses = []
-        reply_markup = None
+        detail_buttons = []
         for exchange_name in exchanges:
             try:
                 validation_candidate = await asyncio.to_thread(validate_trading_pair, symbol, exchange_name=exchange_name)
@@ -802,11 +875,13 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
             response += f"<b>Reasoning</b>: {reasoning}"
             responses.append(response)
 
-            if strategy.get('suggestion_id') and reply_markup is None:
-                keyboard = [
-                    [InlineKeyboardButton("📜 View Analysis Details", callback_data=f"details_{strategy['suggestion_id']}")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
+            if strategy.get('suggestion_id'):
+                detail_buttons.append(
+                    [InlineKeyboardButton(
+                        f"📜 {exchange_name.upper()} details",
+                        callback_data=f"details_{strategy['suggestion_id']}"
+                    )]
+                )
 
         if not responses:
             if update.callback_query:
@@ -821,11 +896,11 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
 
         if update.callback_query:
             if preserve_source_message:
-                await status_editor.edit_text("\n\n".join(responses), parse_mode='HTML', reply_markup=reply_markup)
+                await status_editor.edit_text("\n\n".join(responses), parse_mode='HTML', reply_markup=InlineKeyboardMarkup(detail_buttons) if detail_buttons else None)
             else:
-                await safe_edit_message_text(status_editor, "\n\n".join(responses), parse_mode='HTML', reply_markup=reply_markup)
+                await safe_edit_message_text(status_editor, "\n\n".join(responses), parse_mode='HTML', reply_markup=InlineKeyboardMarkup(detail_buttons) if detail_buttons else None)
         else:
-            await status_editor.edit_text("\n\n".join(responses), parse_mode='HTML', reply_markup=reply_markup)
+            await status_editor.edit_text("\n\n".join(responses), parse_mode='HTML', reply_markup=InlineKeyboardMarkup(detail_buttons) if detail_buttons else None)
         clear_pending_flow(context)
 
     except Exception as e:
@@ -851,15 +926,8 @@ async def details_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.edit_message_text(text="❌ Details not available for this analysis.")
         return
 
-    data = details['analysis_data']
-    
-    message = f"📜 <b>Analysis Details for {details['symbol']}</b>\n\n"
-    message += f"<b>Technical Indicators</b>:\n{html.escape(data.get('ta_summary', 'N/A'))}\n"
-    message += f"<b>News Context</b>:\n{html.escape(data.get('news_summary', 'N/A'))}\n"
-    
-    if data.get('memory_section') and "No past trades" not in data['memory_section']:
-        message += f"<b>Past Performance Context</b>:\n{html.escape(data['memory_section'])}\n"
-        
+    message = format_analysis_details_message(details)
+
     await context.bot.send_message(
         chat_id=query.message.chat_id,
         text=message,
@@ -1355,7 +1423,7 @@ def main() -> None:
     job_queue.run_repeating(run_daily_signals, interval=daily_interval, first=30)
 
     # Run the bot until the user presses Ctrl-C
-    print(f"[{datetime.now()}] Telegram bot started with AI Strategy Advisor. Listening for updates...")
+    print(f"[{datetime.now()}] Telegram bot started with Deterministic Strategy Advisor. Listening for updates...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':

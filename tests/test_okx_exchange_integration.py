@@ -62,7 +62,7 @@ def _patch_okx_http(monkeypatch):
     monkeypatch.setattr('src.exchanges.okx.requests.get', fake_get)
 
 
-def test_okx_is_exposed_end_to_end_through_registry_ui_and_service(monkeypatch):
+def test_okx_is_exposed_through_registry_ui_and_service(monkeypatch):
     _patch_okx_http(monkeypatch)
 
     assert 'okx' in get_supported_exchange_names()

@@ -1,6 +1,6 @@
-# Multi-Exchange Volume Tracker & AI Strategy Advisor
+# Multi-Exchange Volume Tracker & Strategy Advisor
 
-This project tracks cryptocurrency volume on Binance and Kraken and sends alerts based on predefined volume levels. It is built around a modular exchange registry so future exchanges can be added without breaking the existing Binance/Kraken behavior. The project also includes an **AI-powered Strategy Advisor** that analyzes market data, technical indicators, and news to suggest trading strategies with a self-improving learning loop.
+This project tracks cryptocurrency volume on Binance and Kraken and sends alerts based on predefined volume levels. It is built around a modular exchange registry so future exchanges can be added without breaking the existing Binance/Kraken behavior. The project also includes a **Deterministic Strategy Advisor** that analyzes market data, technical indicators, and news to suggest trading strategies with repeatable rules.
 
 ## Features
 
@@ -16,11 +16,11 @@ This project tracks cryptocurrency volume on Binance and Kraken and sends alerts
     - Exchange-specific trade links when available
     - Exchange scope so you can see whether an alert came from Binance, Kraken, or a future supported venue
 
-### AI Strategy Advisor (New)
-- **Smart Analysis**: Uses LLM (via OpenRouter) to analyze technical indicators (RSI, MACD, Bollinger Bands, EMA) and crypto news.
-- **Memory & Learning**: Tracks all suggestions and evaluates outcomes to learn from past performance.
+### Deterministic Strategy Advisor
+- **Rule-Based Analysis**: Uses deterministic scoring over technical indicators (RSI, MACD, Bollinger Bands, EMA) and live exchange data.
+- **Separated News Context**: News headlines are shown for reference only and do not influence the trading signal.
 - **WAIT Strategy Support**: Even "WAIT" recommendations are tracked and scored based on price movement.
-- **Detailed Context**: View full analysis details including technical indicators, news sources, and past performance influence.
+- **Detailed Context**: View full analysis details including the indicators, deterministic rule triggers, and linked headlines.
 
 ### Telegram Bot Commands
 - `/analyze <SYMBOL>` - Get AI-generated trading strategy with Entry, TP, SL, and confidence score.
@@ -62,21 +62,17 @@ This project tracks cryptocurrency volume on Binance and Kraken and sends alerts
       "telegram_bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
       "telegram_chat_id": "YOUR_TELEGRAM_CHAT_ID",
       "telegram_bot_token_test": "YOUR_TEST_BOT_TOKEN",
-      "telegram_chat_id_test": "YOUR_TEST_CHAT_ID",
-      "llm_api_key": "YOUR_OPENROUTER_API_KEY",
-      "llm_base_url": "https://openrouter.ai/api/v1",
-      "llm_model": "google/gemini-2.0-flash-lite-preview-02-05:free"
+      "telegram_chat_id_test": "YOUR_TEST_CHAT_ID"
     }
     ```
     **Important:** 
     - Ensure the keys for Telegram credentials are exactly `telegram_bot_token` and `telegram_chat_id` (lowercase 't').
-    - For AI strategy advisor, get an API key from [OpenRouter](https://openrouter.ai/) (free tier available).
-    - The `llm_model` can be changed to any OpenRouter-supported model.
+    - The strategy advisor is deterministic and does not require any extra AI credentials.
 
 4.  **Run the Application:**
     The application consists of two main components that can be run concurrently:
 
-    a.  **Run the Telegram Bot Handler** (includes AI Strategy Advisor):
+    a.  **Run the Telegram Bot Handler** (includes Strategy Advisor):
         ```bash
         .venv/bin/python telegram_bot_handler.py
         ```
@@ -110,7 +106,7 @@ This project tracks cryptocurrency volume on Binance and Kraken and sends alerts
 
 ## Telegram Bot Commands
 
-### AI Strategy Advisor Commands
+### Strategy Advisor Commands
 
 *   `/analyze <SYMBOL>` - Get AI-generated trading strategy for any symbol.
     ```
@@ -121,15 +117,13 @@ This project tracks cryptocurrency volume on Binance and Kraken and sends alerts
     TP: 70000.0
     SL: 62000.0
     
-    Reasoning: RSI shows oversold conditions with positive MACD divergence. 
-    Recent institutional adoption news supports bullish sentiment.
+    Reasoning: RSI is oversold and MACD is bullish, so the rule score is positive.
     [📜 View Analysis Details]
     ```
     The "View Analysis Details" button reveals:
     - Technical indicators (RSI, MACD, Bollinger Bands, EMA values)
-    - News headlines used in analysis
-    - Past performance on this symbol
-    - Lessons from previous failures
+    - Deterministic rule triggers and score
+    - News headlines with source links, shown separately as informational context
 
 *   `/history` - Show AI strategy performance statistics.
     ```
@@ -176,7 +170,7 @@ This project tracks cryptocurrency volume on Binance and Kraken and sends alerts
 
 To run the services as background processes on an Ubuntu system, you can use `systemd`. This provides robust process management, including automatic restarts and centralized logging.
 
-### Option 1: AI Strategy Advisor Bot (Recommended)
+### Option 1: Strategy Advisor Bot (Recommended)
 
 This service runs the Telegram bot with all AI features including the background performance tracker.
 
@@ -190,7 +184,7 @@ Add the following content:
 
 ```ini
 [Unit]
-Description=Multi-Exchange AI Strategy Advisor Bot
+Description=Multi-Exchange Strategy Advisor Bot
 After=network.target
 
 [Service]
@@ -254,7 +248,7 @@ sudo systemctl start binance-volume-tracker.service
 
 ### Running Both Services
 
-To run both the AI Strategy Advisor AND the Volume Tracker simultaneously:
+To run both the Strategy Advisor AND the Volume Tracker simultaneously:
 
 ```bash
 # Start both services
@@ -310,7 +304,7 @@ The hook runs `uv sync`, bootstrapping `uv` on the server if needed, then restar
 -   `alert_levels_tg.py`: Defines logic for volume alert levels.
 -   `telegram_alerts.py`: Handles sending messages to Telegram, now with inline button support.
 -   `symbol_manager.py`: Manages the loading, saving, adding, and removing of restricted trading pairs.
--   `telegram_bot_handler.py`: Handles all Telegram bot commands and callback queries for dynamic pair management.
+-   `telegram_bot_handler.py`: Handles all Telegram bot commands and callback queries for dynamic pair management and deterministic strategy analysis.
 -   `credentials_b.json`: Stores Binance API credentials and Telegram bot credentials (ignored by `.gitignore`).
 -   `.gitignore`: Specifies files and directories to be ignored by Git.
 -   `memory-bank/`: Contains project documentation and changelog.

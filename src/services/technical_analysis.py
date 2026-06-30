@@ -82,7 +82,7 @@ def get_latest_indicators(df):
 
 def format_indicators_for_llm(indicators):
     """
-    Format indicators for LLM prompt.
+    Format indicators for downstream strategy logic.
     
     Args:
         indicators: dict of indicator values

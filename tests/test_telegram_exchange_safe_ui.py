@@ -298,6 +298,58 @@ def test_analysis_error_fallback_hides_raw_market_data_error(monkeypatch):
     assert 'Is it a valid symbol' not in final_text
 
 
+def test_details_callback_shows_clickable_news_links(monkeypatch):
+    details = {
+        'id': 17,
+        'symbol': 'SAFEUSD',
+        'strategy_type': 'WAIT',
+        'reasoning': 'Deterministic score stayed neutral.',
+        'analysis_data': {
+            'exchange_name': 'kraken',
+            'action': 'WAIT',
+            'confidence': 72,
+            'entry': 100.0,
+            'tp': 100.0,
+            'sl': 100.0,
+            'score': 1,
+            'rule_ids': ['macd_bullish'],
+            'indicators': {
+                'rsi': 61.35,
+                'macd': 0.12,
+                'macd_signal': 0.10,
+                'ema_50': 0.11,
+                'bb_lower': 0.09,
+                'bb_upper': 0.14,
+            },
+            'news_items': [
+                {'title': 'SAFE update', 'source': 'Feed', 'url': 'https://example.test/news'},
+            ],
+        },
+    }
+
+    observed = {}
+
+    async def fake_send_message(chat_id, text, parse_mode=None):
+        observed['chat_id'] = chat_id
+        observed['text'] = text
+        observed['parse_mode'] = parse_mode
+
+    monkeypatch.setattr(telegram_bot_handler, 'get_suggestion_details', lambda suggestion_id: details)
+
+    update = _make_update(callback_data='details_17')
+    update.callback_query.message = SimpleNamespace(chat_id=999)
+    context = SimpleNamespace(bot=SimpleNamespace(send_message=fake_send_message))
+
+    asyncio.run(telegram_bot_handler.details_callback(update, context))
+
+    assert observed['chat_id'] == 999
+    assert observed['parse_mode'] == 'HTML'
+    assert '<a href="https://example.test/news">SAFE update</a>' in observed['text']
+    assert 'Informational news — not used in the signal' in observed['text']
+    assert 'Deterministic score' in observed['text']
+    assert 'Entry / TP / SL' in observed['text']
+
+
 def test_scope_callback_list_watch_groups_by_exchange(tmp_path):
     path = tmp_path / 'watchlist.json'
     path.write_text(json.dumps({'watchlist': {'binance': ['BTCUSDC'], 'kraken': ['BTCUSD']}}))

@@ -1,11 +1,11 @@
 # AGENTS.md - Agentic Coding Guidelines
 
 ## Project Overview
-Python-based cryptocurrency volume tracker for Binance that sends Telegram alerts for significant volume changes. Now includes an **AI-powered Strategy Advisor** with self-improving learning capabilities.
+Python-based cryptocurrency volume tracker for Binance that sends Telegram alerts for significant volume changes. Now includes a **deterministic Strategy Advisor** with exchange-specific data grounding and structured analysis details.
 
 ### Components
 1. **Volume Tracker** (`b_volume_alerts.py`) - Monitors volume changes and sends alerts
-2. **AI Strategy Advisor** (`telegram_bot_handler.py`) - LLM-powered trading strategy suggestions with memory
+2. **Strategy Advisor** (`telegram_bot_handler.py`) - Deterministic trading strategy suggestions with structured evidence
 3. **Service Layer** (`src/services/`) - Modular business logic for market data, technical analysis, and persistence
 
 ## Build Commands
@@ -16,11 +16,11 @@ uv sync
 
 # Run main scripts
 python b_volume_alerts.py          # Volume tracking and alerts (legacy)
-python telegram_bot_handler.py      # Telegram bot with AI Strategy Advisor
+python telegram_bot_handler.py      # Telegram bot with Deterministic Strategy Advisor
 python telegram_alerts.py           # Test Telegram messaging
 
-# Run AI Strategy Advisor services individually
-python -m src.services.llm_strategy     # Test strategy generation
+# Run Strategy Advisor services individually
+python -m src.services.strategy_advisor     # Test strategy generation
 python -m src.services.performance_tracker  # Test performance tracking
 python -m src.services.db_service       # Test database operations
 
@@ -107,7 +107,6 @@ This keeps the interactions explicit, removes guesswork, and lets both you and t
 - `python-binance` - Binance API client
 - `numpy` - Added numpy as it's often a dependency for pandas operations, and the user mentioned np.float64
 - `pandas-ta` - Technical analysis indicators (RSI, MACD, Bollinger Bands)
-- `openai` - LLM integration via OpenRouter
 - `APScheduler` - Task scheduling for performance tracking
 
 ### Credentials Management
@@ -128,15 +127,15 @@ This keeps the interactions explicit, removes guesswork, and lets both you and t
 ### Service Deployment
 - Use `systemd` for Linux service management
 - Two services available:
-  1. `binance-strategy-bot.service` - Telegram bot with AI Strategy Advisor (recommended)
+  1. `binance-strategy-bot.service` - Telegram bot with Deterministic Strategy Advisor (recommended)
   2. `binance-volume-tracker.service` - Volume alerts only (legacy)
 - See README.md for detailed service file templates
 
 #### Suggestion Lifecycle
-1. **Generation** (`llm_strategy.py`): Analyze symbol → Generate strategy (LONG/SHORT/WAIT) → Save to DB with full context
-2. **Storage** (`db_service.py`): Persist suggestion with `analysis_data` (TA, news, memory) as JSON. Use `get_last_analyzed_symbols` for dynamic UI menus.
-3. **Tracking** (`performance_tracker.py`): Background job evaluates outcomes every 30 minutes
-4. **Learning**: Past outcomes feed back into future analysis prompts via `memory_section` and `mistakes_section`
+1. **Generation** (`strategy_advisor.py`): Analyze symbol → Generate strategy (LONG/SHORT/WAIT) → Save to DB with structured evidence
+2. **Storage** (`db_service.py`): Persist suggestion with `analysis_data` (TA, news, score, rules) as JSON. Use `get_last_analyzed_symbols` for dynamic UI menus.
+3. **Tracking** (`performance_tracker.py`): Background job evaluates outcomes every 30 minutes using the stored exchange
+4. **Learning**: Historical outcomes are visible in the DB/UI, but they do not influence the deterministic signal
 
 #### Telegram Interaction Patterns
 - **Robust Message Parsing**: Use `update.effective_message` instead of `update.message` to handle both direct commands and `callback_query` updates.

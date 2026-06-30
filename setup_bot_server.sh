@@ -36,7 +36,7 @@ show_usage() {
     echo "  $0 --python-deps --systemd-services         # Install deps and configure services"
     echo ""
     echo "Services created:"
-    echo "  - binance-strategy-bot.service (AI Strategy Advisor + Telegram Bot)"
+    echo "  - binance-strategy-bot.service (Deterministic Strategy Advisor + Telegram Bot)"
     echo "  - binance-volume-tracker.service (Volume alerts only - legacy)"
     echo ""
     echo "Installation directory: $INSTALL_DIR"
@@ -158,7 +158,7 @@ if [ "$RUN_SYSTEMD_SERVICES" = true ]; then
     echo "Creating binance-strategy-bot.service..."
     sudo tee /etc/systemd/system/binance-strategy-bot.service > /dev/null <<EOF
 [Unit]
-Description=Binance AI Strategy Advisor Bot
+Description=Binance Deterministic Strategy Advisor Bot
 After=network.target
 
 [Service]
@@ -207,7 +207,7 @@ EOF
     echo "Services configured successfully!"
     echo "========================================"
     echo ""
-    echo "AI Strategy Bot (RECOMMENDED):"
+    echo "Strategy Bot (RECOMMENDED):"
     echo "  Status: sudo systemctl status binance-strategy-bot.service"
     echo "  Logs:   sudo journalctl -u binance-strategy-bot.service -f"
     echo ""

@@ -148,10 +148,12 @@ def track_performance():
     for suggestion in pending:
         symbol = suggestion['symbol']
         suggestion_id = suggestion['id']
+        analysis_data = suggestion.get('analysis_data') or {}
+        exchange_name = analysis_data.get('exchange_name', 'binance')
         
         try:
             # Get current price
-            current_price = get_current_price(symbol)
+            current_price = get_current_price(symbol, exchange_name=exchange_name)
             
             # Evaluate trade
             status, pnl = evaluate_trade(suggestion, current_price)
@@ -165,7 +167,7 @@ def track_performance():
                 print(f"[{datetime.now()}] Trade #{suggestion_id} ({symbol}): Still pending")
         
         except Exception as e:
-            print(f"[{datetime.now()}] Error evaluating trade #{suggestion_id} ({symbol}): {e}")
+            print(f"[{datetime.now()}] Error evaluating trade #{suggestion_id} ({symbol} on {exchange_name}): {e}")
             continue
     
     print(f"[{datetime.now()}] Performance tracking complete. Updated {updated_count} trades")
@@ -181,17 +183,18 @@ def track_performance():
     for signal in pending_signals:
         symbol = signal['symbol']
         signal_id = signal['id']
+        exchange_name = signal.get('exchange_name', 'binance')
         try:
-            current_price = get_current_price(symbol)
+            current_price = get_current_price(symbol, exchange_name=exchange_name)
             status, pnl = evaluate_signal_trade(signal, current_price)
             if status != 'PENDING':
                 update_signal_trade_outcome(signal_id, status, pnl)
                 signal_updates += 1
-                print(f"[{datetime.now()}] Signal #{signal_id} ({symbol}): {status} (PnL: {pnl}%)")
+                print(f"[{datetime.now()}] Signal #{signal_id} ({symbol} on {exchange_name}): {status} (PnL: {pnl}%)")
             else:
-                print(f"[{datetime.now()}] Signal #{signal_id} ({symbol}): Still pending")
+                print(f"[{datetime.now()}] Signal #{signal_id} ({symbol} on {exchange_name}): Still pending")
         except Exception as e:
-            print(f"[{datetime.now()}] Error evaluating signal #{signal_id} ({symbol}): {e}")
+            print(f"[{datetime.now()}] Error evaluating signal #{signal_id} ({symbol} on {exchange_name}): {e}")
             continue
 
     print(f"[{datetime.now()}] Signal tracking complete. Updated {signal_updates} signal trades")

@@ -17,6 +17,16 @@ def get_connection():
     return conn
 
 
+def _deserialize_analysis_data(row):
+    data = dict(row)
+    if data.get('analysis_data'):
+        try:
+            data['analysis_data'] = json.loads(data['analysis_data'])
+        except json.JSONDecodeError:
+            data['analysis_data'] = {}
+    return data
+
+
 def init_db():
     """Initialize database with tables."""
     conn = get_connection()
@@ -262,8 +272,8 @@ def get_pending_suggestions():
     
     rows = cursor.fetchall()
     conn.close()
-    
-    return [dict(row) for row in rows]
+
+    return [_deserialize_analysis_data(row) for row in rows]
 
 
 def update_outcome(suggestion_id, status, pnl_percent=None):
@@ -310,8 +320,8 @@ def get_trade_history(symbol=None, limit=10):
     
     rows = cursor.fetchall()
     conn.close()
-    
-    return [dict(row) for row in rows]
+
+    return [_deserialize_analysis_data(row) for row in rows]
 
 
 def get_last_analyzed_symbols(limit=5):
@@ -349,8 +359,8 @@ def get_recent_failures(limit=5):
     
     rows = cursor.fetchall()
     conn.close()
-    
-    return [dict(row) for row in rows]
+
+    return [_deserialize_analysis_data(row) for row in rows]
 
 
 def get_performance_stats(symbol=None, start_date=None, end_date=None):
@@ -434,13 +444,7 @@ def get_suggestions_between_dates(limit=10, start_date=None, end_date=None, comp
 
     result = []
     for row in rows:
-        data = dict(row)
-        if data.get('analysis_data'):
-            try:
-                data['analysis_data'] = json.loads(data['analysis_data'])
-            except json.JSONDecodeError:
-                data['analysis_data'] = {}
-        result.append(data)
+        result.append(_deserialize_analysis_data(row))
     return result
 
 
@@ -453,13 +457,7 @@ def get_suggestion_details(suggestion_id):
     conn.close()
     
     if row:
-        data = dict(row)
-        if data.get('analysis_data'):
-            try:
-                data['analysis_data'] = json.loads(data['analysis_data'])
-            except json.JSONDecodeError:
-                data['analysis_data'] = {}
-        return data
+        return _deserialize_analysis_data(row)
     return None
 
 
