@@ -6,6 +6,8 @@ if ! command -v systemctl >/dev/null 2>&1; then
   exit 1
 fi
 
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
 if ! command -v uv >/dev/null 2>&1; then
   if command -v curl >/dev/null 2>&1; then
     echo "uv is not installed; bootstrapping it"
