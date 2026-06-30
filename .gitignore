@@ -21,3 +21,6 @@ trading_memory.db
 macro_cache.json
 volume.log
 .sisyphus/boulder.json
+
+# Local runtime state
+signal_watchlist.json
