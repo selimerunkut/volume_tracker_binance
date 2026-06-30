@@ -5,6 +5,10 @@ set -e
 
 INSTALL_DIR="/opt/volume_tracker_binance"
 SERVICE_USER="root"
+UV_BIN="$(command -v uv || true)"
+if [ -z "$UV_BIN" ] && [ -x "$HOME/.local/bin/uv" ]; then
+    UV_BIN="$HOME/.local/bin/uv"
+fi
 
 # Default: run all steps
 RUN_SYSTEM_UPDATE=false
@@ -125,6 +129,7 @@ if [ "$RUN_UV_INSTALL" = true ]; then
 
     # Add uv to PATH for the current session and future sessions
     source $HOME/.local/bin/env
+    UV_BIN="$(command -v uv)"
     echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
     echo "uv installation complete."
     echo ""
@@ -132,6 +137,11 @@ fi
 
 if [ "$RUN_PYTHON_DEPS" = true ]; then
     echo "=== Installing Python dependencies with uv ==="
+
+    if [ -z "$UV_BIN" ]; then
+        echo "uv is not installed. Run this script with --uv-install first."
+        exit 1
+    fi
     
     if [ ! -d "$INSTALL_DIR" ]; then
         echo "Creating installation directory: $INSTALL_DIR"
@@ -142,12 +152,12 @@ if [ "$RUN_PYTHON_DEPS" = true ]; then
     cd "$INSTALL_DIR"
     echo "Working in: $(pwd)"
     
-    uv venv
+    "$UV_BIN" venv
     source .venv/bin/activate
     echo "Virtual environment activated."
-    uv python install
+    "$UV_BIN" python install
     echo "python version: $(python --version) installed."
-    uv pip install -e .
+    "$UV_BIN" pip install -e .
     echo "Python dependencies installed."
     echo ""
 fi
