@@ -1,5 +1,6 @@
 # telegram_alerts.py
 import datetime
+import argparse
 import json
 import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -7,6 +8,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from src.services.db_service import get_setting
 from src.services.alert_preferences import get_alert_exchange_selection, should_send_alert_for_scope
 from src.services.volume_alerts import render_volume_alert_text
+from src.services.volume_alerts import build_volume_alert_message
 
 # Load Telegram bot token and chat ID from credentials_b.json
 def load_telegram_credentials():
@@ -87,19 +89,56 @@ def send_telegram_message(alert_message, include_restrict_button=False, dry_run=
         print(f"[{datetime.datetime.now()}] An unexpected error occurred while sending Telegram message for {symbol}: {e}")
         return False
 
-if __name__ == "__main__":
-    # Example test message for the updated function (no longer needs to check 'ok' field here)
-    test_alert_message = {
-        'exchange': 'BINANCE',
-        'symbol': 'TESTUSDC',
+def build_test_alert_message(symbol='TESTUSDC', exchange='BINANCE'):
+    alert_detail = {
         'curr_volume': 183717.2,
         'prev_volume_mean': 33930.8652173913,
-        'last_1h_volume': 99999, # Example value for testing
-        'last_2h_volume': 123456, # Example value for testing
-        'last_4h_volume': 789012, # Example value for testing
         'level': 'HIGH',
-        'chart_url': 'https://www.tradingview.com/symbols/TESTUSDC/?exchange=BINANCE',
-        'binance_trade_url': 'https://www.binance.com/en/trade/TEST_USDC'
     }
-    print(f"Attempting to send test alert message for '{test_alert_message['symbol']}'")
-    send_telegram_message(test_alert_message) # The function now prints its own success/failure
+    return build_volume_alert_message(
+        alert_detail,
+        last_2h_volume=123456,
+        last_4h_volume=789012,
+        last_completed_hour_volume=99999,
+        open_price=0.04166000,
+        close_price=0.04189000,
+        symbol=symbol,
+        exchange=exchange,
+    )
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Send a test Telegram volume alert.")
+    parser.add_argument(
+        "--test-alert",
+        action="store_true",
+        help="Send a sample volume alert to Telegram.",
+    )
+    parser.add_argument(
+        "--symbol",
+        default="TESTUSDC",
+        help="Symbol to use in the sample alert.",
+    )
+    parser.add_argument(
+        "--exchange",
+        default="BINANCE",
+        help="Exchange name to use in the sample alert.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the alert instead of sending it to Telegram.",
+    )
+    args = parser.parse_args(argv)
+
+    if not args.test_alert and argv is not None and len(argv) > 0:
+        parser.error("Use --test-alert to send a sample Telegram alert.")
+
+    test_alert_message = build_test_alert_message(symbol=args.symbol, exchange=args.exchange)
+    print(f"Attempting to send test alert message for '{test_alert_message['symbol']}' on {test_alert_message['exchange']}")
+    sent = send_telegram_message(test_alert_message, include_restrict_button=True, dry_run=args.dry_run)
+    return 0 if sent else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

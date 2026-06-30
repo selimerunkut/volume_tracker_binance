@@ -122,6 +122,44 @@ def test_volume_alert_restrict_keyboard_also_reuses_analyze_callback():
             os.unlink(temp_db)
 
 
+def test_build_test_alert_message_uses_requested_symbol_and_exchange():
+    telegram_alerts, _ = _load_telegram_alerts_module()
+
+    alert = telegram_alerts.build_test_alert_message(symbol='STEEMUSDC', exchange='KRAKEN')
+
+    assert alert['symbol'] == 'STEEMUSDC'
+    assert alert['exchange'] == 'KRAKEN'
+    assert alert['chart_url'] == 'https://www.tradingview.com/symbols/STEEMUSDC/?exchange=KRAKEN'
+
+
+def test_main_test_alert_mode_sends_volume_alert_with_buttons(monkeypatch):
+    temp_db = _prepare_temp_db()
+    try:
+        telegram_alerts, _ = _load_telegram_alerts_module()
+        telegram_alerts.get_alert_exchange_selection = lambda chat_id: {'mode': 'all', 'exchanges': []}
+
+        sent = {}
+
+        def fake_send(alert_message, include_restrict_button=False, dry_run=False):
+            sent['alert_message'] = alert_message
+            sent['include_restrict_button'] = include_restrict_button
+            sent['dry_run'] = dry_run
+            return True
+
+        monkeypatch.setattr(telegram_alerts, 'send_telegram_message', fake_send)
+
+        exit_code = telegram_alerts.main(['--test-alert', '--symbol', 'STEEMUSDC', '--exchange', 'KRAKEN'])
+
+        assert exit_code == 0
+        assert sent['alert_message']['symbol'] == 'STEEMUSDC'
+        assert sent['alert_message']['exchange'] == 'KRAKEN'
+        assert sent['include_restrict_button'] is True
+        assert sent['dry_run'] is False
+    finally:
+        if os.path.exists(temp_db):
+            os.unlink(temp_db)
+
+
 def test_should_deliver_exchange_alert_matches_scope():
     temp_db = _prepare_temp_db()
     try:
