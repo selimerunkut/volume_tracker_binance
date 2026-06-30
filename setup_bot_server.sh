@@ -198,9 +198,9 @@ EOF
     echo "Reloading systemd daemon..."
     sudo systemctl daemon-reload
 
-    echo "Enabling and starting binance-strategy-bot.service..."
+    echo "Enabling and restarting binance-strategy-bot.service..."
     sudo systemctl enable binance-strategy-bot.service
-    sudo systemctl start binance-strategy-bot.service
+    sudo systemctl restart binance-strategy-bot.service
 
     echo ""
     echo "========================================"
