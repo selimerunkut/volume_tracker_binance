@@ -16,6 +16,7 @@ from src.services.watchlist_manager import WatchlistManager
 # Import services
 from src.services.strategy_advisor import analyze_and_suggest
 from src.services.llm_strategy import analyze_and_suggest as legacy_analyze_and_suggest
+from src.services.llm_strategy import analyze_and_suggest as deepseek_analyze_and_suggest
 from src.services.performance_tracker import track_performance
 from src.services.db_service import get_performance_stats, init_db, get_suggestion_details, get_setting, set_setting
 from src.services.db_service import get_suggestions_between_dates, get_last_analyzed_symbols
@@ -914,6 +915,41 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
                     "<i>Legacy LLM comparison unavailable.</i>"
                 )
             responses.append(legacy_response)
+
+            try:
+                deepseek_candidate = await asyncio.to_thread(
+                    deepseek_analyze_and_suggest,
+                    symbol,
+                    exchange_name=exchange_name,
+                    model='deepseek/deepseek-v4-flash',
+                )
+                deepseek_strategy = deepseek_candidate
+                if inspect.isawaitable(deepseek_candidate):
+                    deepseek_strategy = await deepseek_candidate
+            except Exception as deepseek_error:
+                logger.warning(
+                    "DeepSeek comparison failed for %s on %s: %s",
+                    symbol,
+                    exchange_name,
+                    deepseek_error,
+                )
+                deepseek_strategy = {"error": str(deepseek_error)}
+
+            if deepseek_strategy and 'error' not in deepseek_strategy:
+                deepseek_response = format_strategy_message(
+                    deepseek_strategy,
+                    symbol,
+                    exchange_name,
+                    'DEEPSEEK LLM COMPARISON',
+                )
+                deepseek_response += "\n\n<i>Informational only — not stored or tracked.</i>"
+            else:
+                deepseek_response = (
+                    f"🧠 <b>{html.escape(exchange_name.upper())} DEEPSEEK LLM comparison for "
+                    f"{html.escape(str(symbol))}</b>\n\n"
+                    "<i>DeepSeek LLM comparison unavailable.</i>"
+                )
+            responses.append(deepseek_response)
 
             if strategy.get('suggestion_id'):
                 detail_buttons.append(

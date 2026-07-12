@@ -148,7 +148,7 @@ OUTPUT FORMAT (JSON ONLY):
     return prompt
 
 
-def analyze_and_suggest(symbol, exchange_name='binance'):
+def analyze_and_suggest(symbol, exchange_name='binance', model=None):
     """
     Main function to analyze a symbol and generate a strategy.
     """
@@ -202,7 +202,7 @@ def analyze_and_suggest(symbol, exchange_name='binance'):
             return {"error": "LLM client not configured"}
 
         logger.info("Sending prompt to LLM...")
-        model_id = get_llm_model()
+        model_id = model or get_llm_model()
         completion = client.chat.completions.create(
             model=model_id,
             messages=[
