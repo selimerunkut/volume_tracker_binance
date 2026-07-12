@@ -6,10 +6,21 @@ import os
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import telegram_bot_handler
 from src.services.watchlist_manager import WatchlistManager
+
+
+@pytest.fixture(autouse=True)
+def disable_legacy_llm_by_default(monkeypatch):
+    monkeypatch.setattr(
+        telegram_bot_handler,
+        'legacy_analyze_and_suggest',
+        lambda symbol, exchange_name='binance': {'error': 'LLM client not configured'},
+    )
 
 
 def _make_reply_recorder():
@@ -191,6 +202,47 @@ def test_analyze_command_defaults_to_all_exchanges_without_scope_picker(monkeypa
     assert all('Choose the exchange scope' not in text for text in texts)
     assert analyzed == [('SUIUSD', 'binance'), ('SUIUSD', 'kraken')]
     assert any('Analyzing SUIUSD on BINANCE, KRAKEN' in text for text in texts)
+
+
+def test_analyze_command_adds_clearly_labeled_legacy_comparison(monkeypatch):
+    monkeypatch.setattr(telegram_bot_handler, 'get_supported_exchange_names', lambda: ['binance'])
+    monkeypatch.setattr(telegram_bot_handler, 'validate_trading_pair', lambda symbol, exchange_name='binance': (True, None))
+
+    async def fake_deterministic(symbol, exchange_name='binance'):
+        return {
+            'action': 'LONG',
+            'confidence': 90,
+            'entry': 100,
+            'tp': 110,
+            'sl': 95,
+            'reasoning': 'Deterministic result',
+            'suggestion_id': 12,
+        }
+
+    def fake_legacy(symbol, exchange_name='binance'):
+        return {
+            'action': 'SHORT',
+            'confidence': 62,
+            'entry': 100,
+            'tp': 90,
+            'sl': 105,
+            'reasoning': 'Legacy result',
+        }
+
+    monkeypatch.setattr(telegram_bot_handler, 'analyze_and_suggest', fake_deterministic)
+    monkeypatch.setattr(telegram_bot_handler, 'legacy_analyze_and_suggest', fake_legacy)
+
+    update = _make_update()
+    context = SimpleNamespace(user_data={}, args=['BTCUSDC'])
+
+    asyncio.run(telegram_bot_handler.analyze_symbol(update, context))
+
+    final = update.effective_message.calls[-1]
+    text = final['text']
+    assert text.index('[DETERMINISTIC]') < text.index('LEGACY LLM COMPARISON')
+    assert 'Informational only — not stored or tracked.' in text
+    assert 'SHORT' in text
+    assert final['reply_markup'].inline_keyboard[0][0].callback_data == 'details_12'
 
 
 def test_analyze_command_accepts_ask_parameter_for_scope_picker(monkeypatch):

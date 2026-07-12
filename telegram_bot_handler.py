@@ -15,6 +15,7 @@ from src.services.watchlist_manager import WatchlistManager
 
 # Import services
 from src.services.strategy_advisor import analyze_and_suggest
+from src.services.llm_strategy import analyze_and_suggest as legacy_analyze_and_suggest
 from src.services.performance_tracker import track_performance
 from src.services.db_service import get_performance_stats, init_db, get_suggestion_details, get_setting, set_setting
 from src.services.db_service import get_suggestions_between_dates, get_last_analyzed_symbols
@@ -350,6 +351,30 @@ def format_analysis_details_message(details):
         f"<b>Informational news — not used in the signal</b>:\n{news_html}"
     )
     return message
+
+
+def format_strategy_message(strategy, symbol, exchange_name, label):
+    action = html.escape(str(strategy.get('action', 'N/A')))
+    confidence = strategy.get('confidence', 0)
+    reasoning = html.escape(str(strategy.get('reasoning', 'N/A')))
+    symbol_text = html.escape(str(symbol))
+
+    response = (
+        f"🤖 <b>{html.escape(exchange_name.upper())} strategy for {symbol_text}</b> "
+        f"<i>[{html.escape(label)}]</i>\n\n"
+        f"<b>Action</b>: {action} "
+        f"(Confidence: {confidence}%)\n"
+    )
+
+    if strategy.get('action') in ['LONG', 'SHORT']:
+        response += (
+            f"<b>Entry</b>: {strategy.get('entry')}\n"
+            f"<b>TP</b>: {strategy.get('tp')}\n"
+            f"<b>SL</b>: {strategy.get('sl')}\n\n"
+        )
+
+    response += f"<b>Reasoning</b>: {reasoning}"
+    return response
 
 
 def get_pair_button_analysis_mode():
@@ -769,7 +794,7 @@ async def debug_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
         logger.info(f"DEBUG: Received callback query from {update.effective_user.username}: {update.callback_query.data}")
 
 async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str | None = None, exchange_scope=None, preserve_source_message: bool = False) -> None:
-    """Analyzes a symbol using AI strategy."""
+    """Analyzes a symbol with the deterministic signal and legacy LLM comparison."""
     logger.info(f"DEBUG: analyze_symbol reached with args: {getattr(context, 'args', [])}")
     ask_mode = False
     raw_args = list(getattr(context, 'args', []) or [])
@@ -854,26 +879,41 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
                 responses.append(format_analysis_error_message(symbol, exchange_name, strategy['error']))
                 continue
 
-            action = html.escape(str(strategy.get('action', 'N/A')))
-            confidence = strategy.get('confidence', 0)
-            reasoning = html.escape(str(strategy.get('reasoning', 'N/A')))
-            symbol_text = html.escape(str(symbol))
+            responses.append(format_strategy_message(strategy, symbol, exchange_name, 'DETERMINISTIC'))
 
-            response = (
-                f"🤖 <b>{html.escape(exchange_name.upper())} strategy for {symbol_text}</b>\n\n"
-                f"<b>Action</b>: {action} "
-                f"(Confidence: {confidence}%)\n"
-            )
-
-            if strategy.get('action') in ['LONG', 'SHORT']:
-                response += (
-                    f"<b>Entry</b>: {strategy.get('entry')}\n"
-                    f"<b>TP</b>: {strategy.get('tp')}\n"
-                    f"<b>SL</b>: {strategy.get('sl')}\n\n"
+            try:
+                legacy_candidate = await asyncio.to_thread(
+                    legacy_analyze_and_suggest,
+                    symbol,
+                    exchange_name=exchange_name,
                 )
+                legacy_strategy = legacy_candidate
+                if inspect.isawaitable(legacy_candidate):
+                    legacy_strategy = await legacy_candidate
+            except Exception as legacy_error:
+                logger.warning(
+                    "Legacy LLM comparison failed for %s on %s: %s",
+                    symbol,
+                    exchange_name,
+                    legacy_error,
+                )
+                legacy_strategy = {"error": str(legacy_error)}
 
-            response += f"<b>Reasoning</b>: {reasoning}"
-            responses.append(response)
+            if legacy_strategy and 'error' not in legacy_strategy:
+                legacy_response = format_strategy_message(
+                    legacy_strategy,
+                    symbol,
+                    exchange_name,
+                    'LEGACY LLM COMPARISON',
+                )
+                legacy_response += "\n\n<i>Informational only — not stored or tracked.</i>"
+            else:
+                legacy_response = (
+                    f"🕰 <b>{html.escape(exchange_name.upper())} LEGACY LLM comparison for "
+                    f"{html.escape(str(symbol))}</b>\n\n"
+                    "<i>Legacy LLM comparison unavailable.</i>"
+                )
+            responses.append(legacy_response)
 
             if strategy.get('suggestion_id'):
                 detail_buttons.append(

@@ -16,11 +16,12 @@ This project tracks cryptocurrency volume on Binance and Kraken and sends alerts
     - Exchange-specific trade links when available
     - Exchange scope so you can see whether an alert came from Binance, Kraken, or a future supported venue
 
-### Deterministic Strategy Advisor
+### Strategy Advisor
 - **Rule-Based Analysis**: Uses deterministic scoring over technical indicators (RSI, MACD, Bollinger Bands, EMA) and live exchange data.
 - **Separated News Context**: News headlines are shown for reference only and do not influence the trading signal.
 - **WAIT Strategy Support**: Even "WAIT" recommendations are tracked and scored based on price movement.
 - **Detailed Context**: View full analysis details including the indicators, deterministic rule triggers, and linked headlines.
+- **Legacy Comparison**: The same Telegram message also includes the old LLM analysis, clearly marked as informational and not tracked.
 
 ### Telegram Bot Commands
 - `/analyze <SYMBOL>` - Get AI-generated trading strategy with Entry, TP, SL, and confidence score.
@@ -65,9 +66,15 @@ This project tracks cryptocurrency volume on Binance and Kraken and sends alerts
       "telegram_chat_id_test": "YOUR_TEST_CHAT_ID"
     }
     ```
-    **Important:** 
+    Optional legacy LLM comparison credentials can also be added:
+    ```json
+      "llm_api_key": "YOUR_LLM_API_KEY",
+      "llm_base_url": "https://openrouter.ai/api/v1",
+      "llm_model": "google/gemini-2.5-flash-lite"
+    ```
+    **Important:**
     - Ensure the keys for Telegram credentials are exactly `telegram_bot_token` and `telegram_chat_id` (lowercase 't').
-    - The strategy advisor is deterministic and does not require any extra AI credentials.
+    - The deterministic signal does not require AI credentials; the legacy comparison is unavailable without them.
 
 4.  **Run the Application:**
     The application consists of two main components that can be run concurrently:
