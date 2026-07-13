@@ -50,9 +50,9 @@ def _pick_live_symbol(exchange_name, exchange):
 def _assert_live_klines(df, exchange_name, symbol):
     assert isinstance(df, pd.DataFrame), f'{exchange_name} returned {type(df)!r} for {symbol}'
     assert not df.empty, f'{exchange_name} returned no klines for {symbol}'
-    assert list(df.columns) == ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+    assert list(df.columns) == ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume']
     assert df['timestamp'].is_monotonic_increasing, f'{exchange_name} klines are not ordered oldest-to-newest for {symbol}'
-    for column in ['open', 'high', 'low', 'close', 'volume']:
+    for column in ['open', 'high', 'low', 'close', 'volume', 'quote_volume']:
         assert pd.api.types.is_numeric_dtype(df[column]), f'{exchange_name} column {column} is not numeric for {symbol}'
 
 

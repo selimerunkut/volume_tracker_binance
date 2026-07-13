@@ -76,7 +76,8 @@ class KrakenExchange:
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
             for col in ['open', 'high', 'low', 'close', 'vwap', 'volume']:
                 df[col] = pd.to_numeric(df[col])
-            return df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+            df['quote_volume'] = df['volume'] * df['vwap'].where(df['vwap'] > 0, df['close'])
+            return df[['timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume']]
         except Exception as exc:
             print(f"[{datetime.datetime.now()}] Unexpected error fetching Kraken klines for {symbol}: {exc}")
             return pd.DataFrame()
@@ -91,6 +92,37 @@ class KrakenExchange:
             return float(payload[pair_key]['c'][0])
         except Exception:
             return None
+
+    def fetch_order_book(self, symbol, limit=50):
+        response = requests.get(
+            'https://api.kraken.com/0/public/Depth',
+            params={'pair': symbol, 'count': limit},
+            timeout=self.request_timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()['result']
+        book = payload[next(iter(payload))]
+        return {
+            'bids': [(float(row[0]), float(row[1])) for row in book.get('bids', [])],
+            'asks': [(float(row[0]), float(row[1])) for row in book.get('asks', [])],
+        }
+
+    def fetch_24h_quote_volume(self, symbol):
+        response = requests.get(
+            'https://api.kraken.com/0/public/Ticker',
+            params={'pair': symbol},
+            timeout=self.request_timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()['result']
+        ticker = payload[next(iter(payload))]
+        return float(ticker['v'][1]) * float(ticker['p'][1])
+
+    def quote_to_usd_rate(self, quote_asset):
+        asset = str(quote_asset).upper().replace('BTC', 'XBT')
+        if asset in {'USD', 'USDC', 'USDT'}:
+            return 1.0
+        return self.get_current_price(f'{asset}USD')
 
     def validate_symbol(self, symbol):
         try:

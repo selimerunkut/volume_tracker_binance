@@ -37,7 +37,8 @@ def _build_klines_df(data):
     df["low"] = pd.to_numeric(df["low"])
     df["close"] = pd.to_numeric(df["close"])
     df["volume"] = pd.to_numeric(df["volume"])
-    return df[["timestamp", "open", "high", "low", "close", "volume"]]
+    df["quote_volume"] = pd.to_numeric(df["quote_asset_volume"])
+    return df[["timestamp", "open", "high", "low", "close", "volume", "quote_volume"]]
 
 
 class BinanceExchange:
@@ -69,6 +70,34 @@ class BinanceExchange:
             return float(response.json()['price'])
         except Exception:
             return None
+
+    def fetch_order_book(self, symbol, limit=50):
+        response = requests.get(
+            'https://api.binance.com/api/v3/depth',
+            params={'symbol': symbol, 'limit': limit},
+            timeout=self.request_timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return {
+            'bids': [(float(price), float(quantity)) for price, quantity in payload.get('bids', [])],
+            'asks': [(float(price), float(quantity)) for price, quantity in payload.get('asks', [])],
+        }
+
+    def fetch_24h_quote_volume(self, symbol):
+        response = requests.get(
+            'https://api.binance.com/api/v3/ticker/24hr',
+            params={'symbol': symbol},
+            timeout=self.request_timeout,
+        )
+        response.raise_for_status()
+        return float(response.json()['quoteVolume'])
+
+    def quote_to_usd_rate(self, quote_asset):
+        asset = str(quote_asset).upper()
+        if asset in {'USD', 'USDC', 'USDT'}:
+            return 1.0
+        return self.get_current_price(f'{asset}USDT')
 
     def validate_symbol(self, symbol):
         permission_result = permissions_service.can_trade_symbol(symbol)

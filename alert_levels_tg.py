@@ -6,7 +6,10 @@ def get_volume_alert_details(curr_volume, prev_volume_mean, last_completed_hour_
     exchange_name = (exchange or '').upper()
     chart_url = f"{generate_tradingview_url(symbol, exchange_name)}&interval={interval}"
 
-    # New condition: current volume must also be greater than the last completed hour's volume
+    if prev_volume_mean <= 0:
+        return details
+
+    # Current volume must also be greater than the last completed hour's volume.
     if close_price > open_price and curr_volume > last_completed_hour_volume and curr_volume > prev_volume_mean * 15:
         details.append({
             "level": "1500%+",

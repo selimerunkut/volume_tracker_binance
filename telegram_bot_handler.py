@@ -29,6 +29,11 @@ from src.services.binance_permissions_service import permissions_service
 from src.services.market_data_service import get_top_volume_pairs, validate_trading_pair
 from src.services.signal_service import SignalService
 from src.exchanges.registry import get_exchange, get_supported_exchange_names
+from src.services.volume_alerts import (
+    DEFAULT_VOLUME_MIN_QUOTE_USD,
+    VOLUME_MIN_SETTING_KEY,
+    parse_volume_min_quote_usd,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -575,10 +580,42 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/history - Show trading performance stats\n"
         "/alerts - Toggle volume alerts on/off\n"
         "/alerts_scope [all|single <exchange>|multiple <exchanges...>] - Set alert exchanges\n"
+        "/volume_min [USD] - Show or set the minimum current quote volume\n"
         "\nNote: /analyze defaults to all exchanges; /watch, /unwatch, and /list_watch will ask you to choose a supported exchange or all exchanges before proceeding.\n"
     )
     markup = await get_main_menu_markup()
     await update.effective_message.reply_text(help_text, reply_markup=markup)
+
+
+async def volume_min_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Read or update the global minimum volume-alert threshold."""
+    if str(update.effective_chat.id) != str(TELEGRAM_CHAT_ID):
+        await update.effective_message.reply_text("This command is restricted to the configured alert chat.")
+        return
+
+    raw_current = get_setting(VOLUME_MIN_SETTING_KEY, DEFAULT_VOLUME_MIN_QUOTE_USD)
+    try:
+        current = parse_volume_min_quote_usd(raw_current)
+    except ValueError:
+        current = DEFAULT_VOLUME_MIN_QUOTE_USD
+
+    if not context.args:
+        await update.effective_message.reply_text(
+            f"Minimum current 1h quote volume: ${current:,}"
+        )
+        return
+    if len(context.args) != 1:
+        await update.effective_message.reply_text("Usage: /volume_min [positive whole-dollar USD]")
+        return
+    try:
+        new_value = parse_volume_min_quote_usd(context.args[0])
+    except ValueError:
+        await update.effective_message.reply_text("Usage: /volume_min [positive whole-dollar USD]")
+        return
+    set_setting(VOLUME_MIN_SETTING_KEY, new_value)
+    await update.effective_message.reply_text(
+        f"Minimum current 1h quote volume updated to ${new_value:,}. Effective on the next scan."
+    )
 
 async def list_restricted(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Lists all restricted trading pairs."""
@@ -1469,6 +1506,7 @@ def main() -> None:
     application.add_handler(CommandHandler("history", show_history))
     application.add_handler(CommandHandler("alerts", toggle_alerts_command))
     application.add_handler(CommandHandler("alerts_scope", alerts_scope_command))
+    application.add_handler(CommandHandler("volume_min", volume_min_command))
     application.add_handler(CommandHandler("high_volume", high_volume))
     application.add_handler(CommandHandler("watch", watch_pair))
     application.add_handler(CommandHandler("unwatch", unwatch_pair))

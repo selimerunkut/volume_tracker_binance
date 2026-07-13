@@ -2,6 +2,23 @@
 
 from __future__ import annotations
 
+VOLUME_MIN_SETTING_KEY = "volume_alert_min_current_quote_usd"
+DEFAULT_VOLUME_MIN_QUOTE_USD = 50_000
+
+
+def parse_volume_min_quote_usd(value):
+    """Validate the global minimum quote-volume setting."""
+    if isinstance(value, bool):
+        raise ValueError("threshold must be a positive whole-dollar value")
+    raw = str(value).strip()
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("threshold must be a positive whole-dollar value") from exc
+    if parsed <= 0 or raw != str(parsed):
+        raise ValueError("threshold must be a positive whole-dollar value")
+    return parsed
+
 
 def generate_tradingview_url(symbol, exchange='BINANCE'):
     exchange_name = (exchange or 'BINANCE').upper()
@@ -33,13 +50,14 @@ def build_volume_alert_message(
     exchange='BINANCE',
     chart_url=None,
     trade_url=None,
+    enrichment=None,
 ):
     """Build the alert payload once so exchange branches do not duplicate it."""
     chart_link = chart_url or generate_tradingview_url(symbol, exchange)
     trade_link = trade_url or generate_trade_url(symbol, exchange)
     exchange_name = (exchange or 'BINANCE').upper()
 
-    return {
+    message = {
         'exchange': exchange_name,
         'symbol': symbol,
         'curr_volume': alert_detail['curr_volume'],
@@ -54,6 +72,9 @@ def build_volume_alert_message(
         'trade_url': trade_link,
         'binance_trade_url': trade_link if exchange_name == 'BINANCE' else None,
     }
+    if enrichment:
+        message.update(enrichment)
+    return message
 
 
 def render_volume_alert_text(alert_message, include_exchange=False):
@@ -76,15 +97,37 @@ def render_volume_alert_text(alert_message, include_exchange=False):
         trade_url = 'N/A'
 
     header_exchange = f" - {exchange}" if include_exchange else ""
-    return (
+    text = (
         f"🚨 *Volume Alert{header_exchange} - {symbol}* 🚨\n"
-        f"📊 Current Volume: {curr_volume:,}\n"
-        f"📈 Previous 6h Mean Volume: {prev_volume_mean:,}\n"
-        f"🕐 Last 1h Volume: {last_1h_volume:,}\n"
-        f"🕒 Last 2h Volume: {last_2h_volume:,}\n"
-        f"🕓 Last 4h Volume: {last_4h_volume:,}\n"
+        f"📊 Current Volume: {curr_volume:,} | Current 1h Quote Volume: ${curr_volume:,}\n"
+        f"📈 Previous 6h Mean Quote Volume: ${prev_volume_mean:,}\n"
+        f"🕐 Previous Completed 1h: ${last_1h_volume:,}\n"
+        f"🕒 Previous Completed 2h: ${last_2h_volume:,}\n"
+        f"🕓 Previous Completed 4h: ${last_4h_volume:,}\n"
         f"💹 Last 1h Vol. candle Prices, Open: {open_price}, Close: {close_price}\n"
         f"🔥 Alert Level: *{level}*\n"
         f"🔗 {chart_url}\n"
         f"🔗 {trade_url}"
     )
+    if 'quote_volume_24h' in alert_message:
+        text = text.replace(
+            f"🔥 Alert Level: *{level}*\n",
+            f"🔥 Alert Level: *{level}*\n💧 24h Quote Volume: ${int(alert_message['quote_volume_24h']):,}\n",
+        )
+    if 'liquidity' in alert_message:
+        liquidity = alert_message['liquidity']
+        if liquidity.get('unavailable'):
+            text = text.replace(
+                f"🔥 Alert Level: *{level}*\n",
+                f"🔥 Alert Level: *{level}*\n⚠️ Liquidity estimate unavailable\n",
+            )
+        else:
+            sizes = " | ".join(
+                f"${size // 1000}k {data['slippage_pct']:.2f}%"
+                for size, data in liquidity['sizes'].items()
+            )
+            text = text.replace(
+                f"🔥 Alert Level: *{level}*\n",
+                f"🔥 Alert Level: *{level}*\n📚 Est. buy slippage: {sizes}\n{liquidity['summary']}\n",
+            )
+    return text

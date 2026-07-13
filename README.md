@@ -173,6 +173,14 @@ This project tracks cryptocurrency volume on Binance and Kraken and sends alerts
 
 *   `/alerts_scope` - Open the alert exchange selector. Use it to choose a single exchange, several exchanges, or all supported exchanges. The selector is shared by the volume scanner and keeps other exchange-specific behavior modular.
 
+*   `/volume_min` - Show the minimum current 1-hour quote volume used by the scanner.
+    ```
+    /volume_min
+    Minimum current 1h quote volume: $50,000
+    /volume_min 75000
+    ```
+    The setting accepts positive whole-dollar values, is global for the scanner, and takes effect on the next scan. Only the configured Telegram alert chat can change it. Alerts that pass the threshold also include 24-hour quote volume and estimated buy slippage for $3k, $5k, and $10k entries when public order-book data is available. The current candle is still forming; visible depth is only an estimate and excludes fees, cancellations, latency, and intervening trades. USD, USDC, and USDT are treated as $1 for filtering.
+
 ## Scheduling with Systemd on Ubuntu
 
 To run the services as background processes on an Ubuntu system, you can use `systemd`. This provides robust process management, including automatic restarts and centralized logging.

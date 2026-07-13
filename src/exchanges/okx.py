@@ -107,10 +107,10 @@ class OKXExchange:
                 ],
             )
             df['timestamp'] = pd.to_datetime(pd.to_numeric(df['timestamp'], errors='coerce'), unit='ms', utc=True).dt.tz_localize(None)
-            for column in ['open', 'high', 'low', 'close', 'volume']:
+            for column in ['open', 'high', 'low', 'close', 'volume', 'volCcyQuote']:
                 df[column] = pd.to_numeric(df[column])
             df = df.sort_values('timestamp').reset_index(drop=True)
-            return df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+            return df[['timestamp', 'open', 'high', 'low', 'close', 'volume', 'volCcyQuote']].rename(columns={'volCcyQuote': 'quote_volume'})
         except Exception as exc:
             print(f"[{datetime.datetime.now()}] Unexpected error fetching OKX klines for {normalized_symbol}: {exc}")
             return pd.DataFrame()
@@ -130,6 +130,36 @@ class OKXExchange:
             return float(data[0]['last'])
         except Exception:
             return None
+
+    def fetch_order_book(self, symbol, limit=50):
+        normalized_symbol = self._normalize_symbol(symbol)
+        response = self._request('/api/v5/market/books', params={'instId': normalized_symbol, 'sz': limit})
+        response.raise_for_status()
+        payload = response.json()
+        data = payload.get('data', [])
+        if str(payload.get('code', '0')) != '0' or not data:
+            raise ValueError('OKX returned no order book')
+        book = data[0]
+        return {
+            'bids': [(float(row[0]), float(row[1])) for row in book.get('bids', [])],
+            'asks': [(float(row[0]), float(row[1])) for row in book.get('asks', [])],
+        }
+
+    def fetch_24h_quote_volume(self, symbol):
+        normalized_symbol = self._normalize_symbol(symbol)
+        response = self._request('/api/v5/market/ticker', params={'instId': normalized_symbol})
+        response.raise_for_status()
+        payload = response.json()
+        data = payload.get('data', [])
+        if str(payload.get('code', '0')) != '0' or not data:
+            raise ValueError('OKX returned no ticker')
+        return float(data[0]['volCcyQuote'])
+
+    def quote_to_usd_rate(self, quote_asset):
+        asset = str(quote_asset).upper()
+        if asset in {'USD', 'USDC', 'USDT'}:
+            return 1.0
+        return self.get_current_price(f'{asset}-USDT')
 
     def validate_symbol(self, symbol):
         normalized_symbol = self._normalize_symbol(symbol)

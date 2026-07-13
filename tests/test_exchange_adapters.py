@@ -36,9 +36,10 @@ def test_binance_adapter_shapes_klines(monkeypatch):
 
     df = BinanceExchange().fetch_klines('BTCUSDC', limit=2)
 
-    assert list(df.columns) == ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+    assert list(df.columns) == ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume']
     assert len(df) == 2
     assert pd.api.types.is_numeric_dtype(df['close'])
+    assert list(df['quote_volume']) == [0, 0]
 
 
 def test_kraken_adapter_shapes_klines(monkeypatch):
@@ -59,9 +60,10 @@ def test_kraken_adapter_shapes_klines(monkeypatch):
 
     df = KrakenExchange().fetch_klines('BTCUSD', limit=2)
 
-    assert list(df.columns) == ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+    assert list(df.columns) == ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume']
     assert len(df) == 2
     assert pd.api.types.is_numeric_dtype(df['volume'])
+    assert list(df['quote_volume']) == [1250, 1414]
 
 
 def test_kraken_adapter_filters_quote_assets_from_wsname(monkeypatch):
@@ -137,6 +139,7 @@ def test_okx_adapter_normalizes_symbols_and_reverses_candles(monkeypatch):
     assert exchange.tradingview_url('BTCUSDC') == 'https://www.tradingview.com/symbols/BTC-USDC/?exchange=OKX'
 
     df = exchange.fetch_klines('BTCUSDC', limit=3)
-    assert list(df.columns) == ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+    assert list(df.columns) == ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume']
     assert list(df['close']) == [9, 11, 13]
+    assert list(df['quote_volume']) == [900, 2200, 3900]
     assert exchange.get_current_price('BTCUSDC') == 123.45

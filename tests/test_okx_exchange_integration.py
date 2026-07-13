@@ -76,7 +76,7 @@ def test_okx_is_exposed_through_registry_ui_and_service(monkeypatch):
     assert exchange.validate_symbol('BTC-USDT') == (False, 'invalid_symbol')
 
     df = market_data_service.fetch_klines('BTCUSDC', exchange_name='okx')
-    assert list(df.columns) == ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+    assert list(df.columns) == ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'quote_volume']
     assert list(df['close']) == [9, 11, 13]
     assert market_data_service.get_current_price('BTCUSDC', exchange_name='okx') == 123.45
     assert market_data_service.validate_trading_pair('BTCUSDC', exchange_name='okx') == (True, None)
@@ -158,12 +158,12 @@ def test_okx_scanner_would_keep_okx_specific_urls_and_symbol_scope(monkeypatch):
         ] if quote_asset == 'USDC' else [],
         fetch_klines=lambda symbol, interval='1h', limit=10: pd.DataFrame(
             {
-                'timestamp': pd.to_datetime([1, 2, 3], unit='s'),
-                'open': [100, 101, 102],
-                'high': [110, 111, 112],
-                'low': [90, 91, 92],
-                'close': [105, 106, 107],
-                'volume': [1, 2, 3],
+                    'timestamp': pd.to_datetime(range(10), unit='s'),
+                    'open': [100] * 10,
+                    'high': [110] * 10,
+                    'low': [90] * 10,
+                    'close': [105] * 10,
+                    'volume': list(range(1, 11)),
             }
         ),
         tradingview_url=lambda symbol: f'https://www.tradingview.com/symbols/{symbol}/?exchange=OKX',
@@ -173,7 +173,7 @@ def test_okx_scanner_would_keep_okx_specific_urls_and_symbol_scope(monkeypatch):
     monkeypatch.setattr(b_volume_alerts, 'get_exchanges_for_scope', lambda scope: [fake_okx])
     monkeypatch.setattr(b_volume_alerts, 'get_alert_exchange_selection', lambda chat_id: {'mode': 'selected', 'exchanges': ['okx']})
     monkeypatch.setattr(b_volume_alerts.permissions_service, 'get_allowed_symbols', lambda: None)
-    monkeypatch.setattr(b_volume_alerts, 'get_setting', lambda key, default='True': 'True')
+    monkeypatch.setattr(b_volume_alerts, 'get_setting', lambda key, default='True': '1' if key == b_volume_alerts.VOLUME_MIN_SETTING_KEY else 'True')
     monkeypatch.setattr(b_volume_alerts, 'load_alert_state', lambda: {})
     monkeypatch.setattr(b_volume_alerts, 'save_alert_state', lambda state: None)
     monkeypatch.setattr(b_volume_alerts.time, 'sleep', lambda seconds: None)

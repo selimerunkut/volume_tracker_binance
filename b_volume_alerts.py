@@ -12,7 +12,14 @@ from telegram_alerts import send_telegram_message
 from telegram_alerts import TELEGRAM_CHAT_ID
 from src.exchanges.registry import get_exchanges_for_scope
 from src.services.alert_preferences import get_alert_exchange_selection
-from src.services.volume_alerts import build_volume_alert_message
+from src.services.volume_alerts import (
+    DEFAULT_VOLUME_MIN_QUOTE_USD,
+    VOLUME_MIN_SETTING_KEY,
+    build_volume_alert_message,
+    parse_volume_min_quote_usd,
+)
+from src.services.quote_value_service import to_usd_quote_value
+from src.services.liquidity_analysis import analyze_entry_liquidity
 from src.services.binance_permissions_service import permissions_service
 from src.services.db_service import get_setting
 
@@ -104,7 +111,7 @@ def get_filtered_symbols(exchange, quote_asset, excluded_symbols):
     """
     pairs = exchange.list_symbols(quote_asset=quote_asset)
     filtered_pairs = [
-        item.symbol for item in pairs
+        item for item in pairs
         if item.symbol not in excluded_symbols
         and 'UP' not in item.symbol
         and 'DOWN' not in item.symbol
@@ -140,7 +147,7 @@ def create_alert_message(
         trade_url=exchange.trade_url(symbol),
     )
 
-def scan_exchange(exchange, symbol_manager, excluded_symbols, dry_run, alerts_enabled, telegram_send_lock):
+def scan_exchange(exchange, symbol_manager, excluded_symbols, dry_run, alerts_enabled, telegram_send_lock, min_quote_volume_usd=DEFAULT_VOLUME_MIN_QUOTE_USD):
     print(f"[{datetime.datetime.now()}] Starting scan on {exchange.display_name}...")
 
     allowed_symbols = permissions_service.get_allowed_symbols() if exchange.name == 'binance' else None
@@ -156,7 +163,7 @@ def scan_exchange(exchange, symbol_manager, excluded_symbols, dry_run, alerts_en
 
     if exchange.name == 'binance' and allowed_symbols:
         trading_group_label = permissions_service.trading_group or 'your trading group'
-        filtered_pairs = [s for s in exchange_pairs if s in allowed_symbols]
+        filtered_pairs = [pair for pair in exchange_pairs if pair.symbol in allowed_symbols]
         print(f"[{datetime.datetime.now()}] {len(filtered_pairs)} of {len(exchange_pairs)} pairs match trading group {trading_group_label}.")
         exchange_pairs = filtered_pairs
     elif exchange.name == 'binance' and allowed_symbols is None:
@@ -167,7 +174,8 @@ def scan_exchange(exchange, symbol_manager, excluded_symbols, dry_run, alerts_en
     print(f"[{datetime.datetime.now()}] Scanning {len(exchange_pairs)} pairs on {exchange.display_name}.")
 
     sent_alerts = []
-    for symbol in exchange_pairs:
+    for pair in exchange_pairs:
+        symbol = pair.symbol
         interval = '1h'
         limit = 10 # Fetch enough data for current volume and a 6-hour mean (last 7 candles)
                    # A limit of 10 for '1h' interval means it fetches the last 10 hours of data.
@@ -180,22 +188,37 @@ def scan_exchange(exchange, symbol_manager, excluded_symbols, dry_run, alerts_en
                 continue
 
             # Current volume is the volume of the currently forming candle
-            curr_volume = df['volume'].iloc[-1]
+            quote_volume = df['quote_volume'] if 'quote_volume' in df.columns else df['close'] * df['volume']
+            quote_asset = getattr(pair, 'quote_asset', 'USD')
+            conversion_rate = 1.0
+            if str(quote_asset).upper() not in {'USD', 'USDC', 'USDT'}:
+                conversion_rate = getattr(exchange, 'quote_to_usd_rate', lambda asset: 1.0)(quote_asset)
+                if conversion_rate is None:
+                    print(f"[{datetime.datetime.now()}] Skipping {symbol}: no USD conversion for {quote_asset}.")
+                    continue
+            usd_quote_volume = quote_volume.map(lambda value: to_usd_quote_value(value, quote_asset, conversion_rate))
+            curr_volume = usd_quote_volume.iloc[-1]
             # Volume of the last completed hour
-            last_completed_hour_volume = df['volume'].iloc[-2]
+            last_completed_hour_volume = usd_quote_volume.iloc[-2]
             # Calculate the mean of the 6 hours before the last completed hour
             # This means taking candles from index -8 up to (but not including) -2
-            prev_volume_mean = df['volume'].iloc[-8:-2].mean()
+            baseline = usd_quote_volume.iloc[-8:-2]
+            prev_volume_mean = baseline.mean()
+            active_baseline = int((baseline > 0).sum())
 
             # Calculate last 2-hour and 4-hour volumes
             # Ensure there are enough data points for these calculations
-            last_2h_volume = df['volume'].iloc[-3:-1].sum() if len(df) >= 3 else 0
-            last_4h_volume = df['volume'].iloc[-5:-1].sum() if len(df) >= 5 else 0
+            last_2h_volume = usd_quote_volume.iloc[-3:-1].sum() if len(df) >= 3 else 0
+            last_4h_volume = usd_quote_volume.iloc[-5:-1].sum() if len(df) >= 5 else 0
 
             print(f"[{datetime.datetime.now()}] {symbol}: Current Volume = {curr_volume}, Previous 6h Mean Volume = {prev_volume_mean}, Last 2h Volume = {last_2h_volume}, Last 4h Volume = {last_4h_volume}")
 
             open_price = df['open'].iloc[-1]
             close_price = df['close'].iloc[-1]
+            if curr_volume < min_quote_volume_usd or active_baseline < 3 or prev_volume_mean <= 0:
+                print(f"[{datetime.datetime.now()}] Skipping {symbol}: below volume/baseline gate.")
+                continue
+
             alert_details_list = get_volume_alert_details(
                 curr_volume,
                 prev_volume_mean,
@@ -238,6 +261,14 @@ def scan_exchange(exchange, symbol_manager, excluded_symbols, dry_run, alerts_en
                     symbol,
                     exchange,
                 )
+                try:
+                    alert_message['quote_volume_24h'] = to_usd_quote_value(
+                        exchange.fetch_24h_quote_volume(symbol), quote_asset, conversion_rate
+                    )
+                    alert_message['liquidity'] = analyze_entry_liquidity(exchange.fetch_order_book(symbol))
+                except Exception as enrichment_error:
+                    print(f"[{datetime.datetime.now()}] Liquidity enrichment unavailable for {symbol}: {enrichment_error}")
+                    alert_message['liquidity'] = {'unavailable': True}
 
                 print(f"[{datetime.datetime.now()}] Sending Telegram message for {symbol} (Level: {level})...")
                 with telegram_send_lock:
@@ -296,6 +327,12 @@ def run_script(dry_run=False):
     exchanges = get_exchanges_for_scope(selection)
     print(f"[{datetime.datetime.now()}] Selected exchanges: {', '.join(exchange.display_name for exchange in exchanges)}")
     alerts_enabled = get_setting("volume_alerts_enabled", "True") != "False"
+    raw_min_volume = get_setting(VOLUME_MIN_SETTING_KEY, DEFAULT_VOLUME_MIN_QUOTE_USD)
+    try:
+        min_quote_volume_usd = parse_volume_min_quote_usd(raw_min_volume)
+    except ValueError:
+        print(f"[{datetime.datetime.now()}] Invalid {VOLUME_MIN_SETTING_KEY}={raw_min_volume!r}; using ${DEFAULT_VOLUME_MIN_QUOTE_USD:,}.")
+        min_quote_volume_usd = DEFAULT_VOLUME_MIN_QUOTE_USD
     telegram_send_lock = threading.Lock()
     sent_alerts = []
 
@@ -310,6 +347,7 @@ def run_script(dry_run=False):
                     dry_run,
                     alerts_enabled,
                     telegram_send_lock,
+                    min_quote_volume_usd,
                 )
                 for exchange in exchanges
             ]
@@ -325,6 +363,7 @@ def run_script(dry_run=False):
                     dry_run,
                     alerts_enabled,
                     telegram_send_lock,
+                    min_quote_volume_usd,
                 )
             )
 
