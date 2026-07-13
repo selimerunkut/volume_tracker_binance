@@ -6,8 +6,10 @@ import datetime
 
 import pandas as pd
 import requests
+from functools import lru_cache
 
 from src.services.volume_alerts import generate_trade_url, generate_tradingview_url
+from src.services.quote_value_service import rate_from_bid_ask
 
 from .base import ExchangeSymbol
 
@@ -58,6 +60,12 @@ class KrakenExchange:
                 )
             )
         return pairs
+
+    @lru_cache(maxsize=1)
+    def _conversion_pairs(self):
+        response = requests.get('https://api.kraken.com/0/public/AssetPairs', timeout=self.request_timeout)
+        response.raise_for_status()
+        return response.json().get('result', {})
 
     def fetch_klines(self, symbol, interval='1h', limit=100):
         interval_map = {'1h': 60, '4h': 240, '1d': 1440}
@@ -122,7 +130,33 @@ class KrakenExchange:
         asset = str(quote_asset).upper().replace('BTC', 'XBT')
         if asset in {'USD', 'USDC', 'USDT'}:
             return 1.0
-        return self.get_current_price(f'{asset}USD')
+        pairs = self._conversion_pairs()
+        candidates = []
+        for key, item in pairs.items():
+            status = str(item.get('status', 'online')).lower()
+            if status != 'online':
+                continue
+            base = str(item.get('base', '')).upper().replace('XXBT', 'XBT').replace('XBT', 'XBT')
+            quote = str(item.get('quote', '')).upper().replace('ZUSD', 'USD').replace('XXBT', 'XBT').replace('XBT', 'XBT')
+            altname = str(item.get('altname') or key).upper()
+            if base == asset and quote in {'USD', 'USDT', 'USDC'}:
+                candidates.append((altname, False))
+            elif quote == asset and base in {'USD', 'USDT', 'USDC'}:
+                candidates.append((altname, True))
+        candidates.sort(key=lambda entry: (entry[1], entry[0]))
+        for pair, inverse in candidates:
+            try:
+                response = requests.get(
+                    'https://api.kraken.com/0/public/Ticker',
+                    params={'pair': pair}, timeout=self.request_timeout,
+                )
+                response.raise_for_status()
+                payload = response.json().get('result', {})
+                ticker = payload[next(iter(payload))]
+                return rate_from_bid_ask(ticker['b'][0], ticker['a'][0], inverse=inverse)
+            except (KeyError, StopIteration, ValueError, TypeError):
+                continue
+        return None
 
     def validate_symbol(self, symbol):
         try:

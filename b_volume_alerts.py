@@ -174,6 +174,7 @@ def scan_exchange(exchange, symbol_manager, excluded_symbols, dry_run, alerts_en
     print(f"[{datetime.datetime.now()}] Scanning {len(exchange_pairs)} pairs on {exchange.display_name}.")
 
     sent_alerts = []
+    conversion_rates = {}
     for pair in exchange_pairs:
         symbol = pair.symbol
         interval = '1h'
@@ -190,12 +191,20 @@ def scan_exchange(exchange, symbol_manager, excluded_symbols, dry_run, alerts_en
             # Current volume is the volume of the currently forming candle
             quote_volume = df['quote_volume'] if 'quote_volume' in df.columns else df['close'] * df['volume']
             quote_asset = getattr(pair, 'quote_asset', 'USD')
-            conversion_rate = 1.0
-            if str(quote_asset).upper() not in {'USD', 'USDC', 'USDT'}:
-                conversion_rate = getattr(exchange, 'quote_to_usd_rate', lambda asset: 1.0)(quote_asset)
-                if conversion_rate is None:
-                    print(f"[{datetime.datetime.now()}] Skipping {symbol}: no USD conversion for {quote_asset}.")
-                    continue
+            quote_key = str(quote_asset).upper()
+            if quote_key not in conversion_rates:
+                if quote_key in {'USD', 'USDC', 'USDT'}:
+                    conversion_rates[quote_key] = 1.0
+                else:
+                    resolver = getattr(exchange, 'quote_to_usd_rate', None)
+                    # Legacy test doubles without conversion support retain
+                    # their historical USD-like behavior; real adapters all
+                    # implement the resolver and fail closed on None.
+                    conversion_rates[quote_key] = resolver(quote_asset) if resolver else 1.0
+            conversion_rate = conversion_rates[quote_key]
+            if conversion_rate is None:
+                print(f"[{datetime.datetime.now()}] Skipping {symbol}: no USD conversion for {quote_asset}.")
+                continue
             usd_quote_volume = quote_volume.map(lambda value: to_usd_quote_value(value, quote_asset, conversion_rate))
             curr_volume = usd_quote_volume.iloc[-1]
             # Volume of the last completed hour

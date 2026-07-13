@@ -143,3 +143,26 @@ def test_okx_adapter_normalizes_symbols_and_reverses_candles(monkeypatch):
     assert list(df['close']) == [9, 11, 13]
     assert list(df['quote_volume']) == [900, 2200, 3900]
     assert exchange.get_current_price('BTCUSDC') == 123.45
+
+
+def test_okx_24h_ticker_uses_quote_currency_24h_field(monkeypatch):
+    monkeypatch.setattr(
+        'src.exchanges.okx.requests.get',
+        lambda *args, **kwargs: FakeResponse({
+            'code': '0',
+            'data': [{'instId': 'ZAMA-EUR', 'volCcy24h': '46636', 'volCcyQuote': '999'}],
+        }),
+    )
+
+    assert OKXExchange().fetch_24h_quote_volume('ZAMA-EUR') == 46636
+
+
+def test_okx_24h_quote_volume_uses_ticker_quote_field(monkeypatch):
+    monkeypatch.setattr(
+        'src.exchanges.okx.requests.get',
+        lambda *args, **kwargs: FakeResponse({
+            'code': '0',
+            'data': [{'instId': 'BTC-USDC', 'volCcy24h': '12345', 'volCcyQuote': '999'}],
+        }),
+    )
+    assert OKXExchange().fetch_24h_quote_volume('BTCUSDC') == 12345

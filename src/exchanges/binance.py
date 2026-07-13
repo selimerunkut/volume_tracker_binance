@@ -6,9 +6,11 @@ import datetime
 
 import pandas as pd
 import requests
+from functools import lru_cache
 
 from src.services.binance_permissions_service import permissions_service
 from src.services.volume_alerts import generate_trade_url, generate_tradingview_url
+from src.services.quote_value_service import rate_from_bid_ask
 
 from .base import ExchangeSymbol
 
@@ -93,11 +95,47 @@ class BinanceExchange:
         response.raise_for_status()
         return float(response.json()['quoteVolume'])
 
+    @lru_cache(maxsize=1)
+    def _spot_symbols(self):
+        response = requests.get('https://api.binance.com/api/v3/exchangeInfo', timeout=self.request_timeout)
+        response.raise_for_status()
+        return response.json().get('symbols', [])
+
     def quote_to_usd_rate(self, quote_asset):
         asset = str(quote_asset).upper()
         if asset in {'USD', 'USDC', 'USDT'}:
             return 1.0
-        return self.get_current_price(f'{asset}USDT')
+        symbols = {
+            str(item.get('symbol', '')).upper(): item
+            for item in self._spot_symbols()
+            if str(item.get('status', '')).upper() == 'TRADING'
+        }
+        candidates = [
+            (f'{asset}USDT', False), (f'{asset}USDC', False), (f'{asset}USD', False),
+            (f'USDT{asset}', True), (f'USDC{asset}', True), (f'USD{asset}', True),
+        ]
+        for symbol, inverse in candidates:
+            item = symbols.get(symbol)
+            base = str(item.get('baseAsset', '')).upper() if item else ''
+            quote = str(item.get('quoteAsset', '')).upper() if item else ''
+            if item and ((not inverse and base == asset and quote in {'USDT', 'USDC', 'USD'})
+                         or (inverse and quote == asset and base in {'USDT', 'USDC', 'USD'})):
+                try:
+                    return rate_from_bid_ask(
+                        *self._book_bid_ask(symbol), inverse=inverse,
+                    )
+                except (ValueError, KeyError):
+                    continue
+        return None
+
+    def _book_bid_ask(self, symbol):
+        response = requests.get(
+            'https://api.binance.com/api/v3/ticker/bookTicker',
+            params={'symbol': symbol}, timeout=self.request_timeout,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get('bidPrice'), data.get('askPrice')
 
     def validate_symbol(self, symbol):
         permission_result = permissions_service.can_trade_symbol(symbol)
@@ -128,7 +166,8 @@ class BinanceExchange:
                 quote_asset=item['quoteAsset'],
             )
             for item in symbols
-            if (quote_asset is None or item['quoteAsset'] == quote_asset)
+            if str(item.get('status', 'TRADING')).upper() == 'TRADING'
+            and (quote_asset is None or item['quoteAsset'] == quote_asset)
             and 'UP' not in item['symbol']
             and 'DOWN' not in item['symbol']
             and 'BEAR' not in item['symbol']

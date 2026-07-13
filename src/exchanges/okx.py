@@ -9,6 +9,7 @@ import pandas as pd
 import requests
 
 from src.services.volume_alerts import generate_tradingview_url
+from src.services.quote_value_service import rate_from_bid_ask
 
 from .base import ExchangeSymbol
 
@@ -32,11 +33,15 @@ class OKXExchange:
         return payload.get('data', []) or []
 
     @lru_cache(maxsize=1)
+    def _all_spot_instruments(self):
+        return [
+            item for item in self._instrument_rows()
+            if str(item.get('state', '')).lower() == 'live'
+        ]
+
     def _instruments(self):
         instruments = []
-        for item in self._instrument_rows():
-            if str(item.get('state', '')).lower() != 'live':
-                continue
+        for item in self._all_spot_instruments():
 
             inst_id = str(item.get('instId') or '').strip().upper()
             base_asset = str(item.get('baseCcy') or '').strip().upper()
@@ -153,13 +158,39 @@ class OKXExchange:
         data = payload.get('data', [])
         if str(payload.get('code', '0')) != '0' or not data:
             raise ValueError('OKX returned no ticker')
-        return float(data[0]['volCcyQuote'])
+        return float(data[0]['volCcy24h'])
 
     def quote_to_usd_rate(self, quote_asset):
         asset = str(quote_asset).upper()
         if asset in {'USD', 'USDC', 'USDT'}:
             return 1.0
-        return self.get_current_price(f'{asset}-USDT')
+        instruments = {
+            str(item.get('instId', '')).upper(): item
+            for item in self._all_spot_instruments()
+        }
+        candidates = [
+            (f'{asset}-USDT', False), (f'{asset}-USDC', False), (f'{asset}-USD', False),
+            (f'USDT-{asset}', True), (f'USDC-{asset}', True), (f'USD-{asset}', True),
+        ]
+        for inst_id, inverse in candidates:
+            item = instruments.get(inst_id)
+            if not item:
+                continue
+            base = str(item.get('baseCcy', '')).upper()
+            quote = str(item.get('quoteCcy', '')).upper()
+            if ((not inverse and base == asset and quote in {'USDT', 'USDC', 'USD'})
+                    or (inverse and quote == asset and base in {'USDT', 'USDC', 'USD'})):
+                try:
+                    response = self._request('/api/v5/market/ticker', params={'instId': inst_id})
+                    response.raise_for_status()
+                    data = response.json().get('data', []) or []
+                    if not data:
+                        continue
+                    ticker = data[0]
+                    return rate_from_bid_ask(ticker.get('bidPx'), ticker.get('askPx'), inverse=inverse)
+                except (KeyError, TypeError, ValueError):
+                    continue
+        return None
 
     def validate_symbol(self, symbol):
         normalized_symbol = self._normalize_symbol(symbol)
