@@ -19,6 +19,20 @@
 - Keep base `volume` for existing consumers and add `quote_volume`; do not silently redefine the existing field.
 - Add no dependency and place no trades.
 
+## Research-Based Conversion Matrix
+
+This plan applies to all exchanges currently registered by the signal tool. It does not add Hyperliquid.
+
+| Exchange | Scanned quote assets | Conversion markets verified in the live public catalog on 2026-07-13 |
+| --- | --- | --- |
+| Binance | `USDC`, `BTC` | `BTCUSDT`, then `BTCUSDC`, both `TRADING` via `/api/v3/exchangeInfo`. |
+| Kraken | `USD`, `BTC` | `XBTUSD`, then `XBTUSDT`, both `online` via `/0/public/AssetPairs`; Kraken internal codes are normalized from `XXBT`/`ZUSD`. |
+| OKX | `USDC`, `EUR`, `USD`, `BTC` | `BTC-USDT`, then `BTC-USDC`; `USDT-EUR`, then `USDC-EUR` inverse markets via `/api/v5/public/instruments`. |
+
+Conversion is exchange-specific behind the shared `quote_to_usd_rate(quote_asset)` interface. Direct `ASSET-STABLE` markets use a conservative bid; inverse `STABLE-ASSET` markets use `1 / ask`. Stable quotes retain the existing 1:1 USD assumption. The scanner caches one rate per quote asset for each exchange scan and fails closed if no live conversion market is available.
+
+Primary API references: [Binance exchange information](https://developers.binance.com/docs/binance-spot-api-docs/rest-api/general-endpoints#exchange-information), [Kraken tradable asset pairs](https://docs.kraken.com/api/docs/rest-api/get-tradable-asset-pairs/), and [OKX public instruments](https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments).
+
 ---
 
 ## User-Visible Contract
@@ -78,7 +92,7 @@ Asks are cheapest-first and bids highest-first. The simulator consumes asks only
 1. The threshold defaults to `$50,000`, persists through the existing settings table, and can be read or changed through `/volume_min`.
 2. Invalid values and unauthorized chats cannot change the setting.
 3. The scanner reads the threshold once per run; sub-threshold candidates make no 24-hour ticker, order-book, or Telegram calls.
-4. Surge calculations use USD-equivalent quote volume, require at least three non-zero candles in the six-candle baseline, and cannot trigger from an exact-zero mean.
+4. Surge calculations use USD-equivalent quote volume on Binance, Kraken, and OKX, require at least three non-zero candles in the six-candle baseline, and cannot trigger from an exact-zero mean.
 5. Existing percentage levels (`500%+`, `700%+`, `1000%+`, `1500%+`) and the positive-price-candle condition remain unchanged.
 6. Qualified alerts retain the existing structure and add 24-hour quote volume plus estimated buy slippage for `$3k`, `$5k`, and `$10k`.
 7. Empty, malformed, or insufficient depth cannot crash scanning and is never labeled safe.
@@ -120,7 +134,11 @@ def to_usd_quote_value(native_quote_value, quote_asset, usd_rate):
 - [ ] Test stable quotes (`USD`, `USDC`, `USDT`) at rate `1.0`, BTC/EUR conversion, invalid inputs, missing rates, and one cached conversion lookup per exchange/quote asset per scan.
 - [ ] Run `uv run pytest -q tests/test_quote_value_service.py`; expect failure before implementation.
 - [ ] Keep `ExchangeSymbol.quote_asset` in the scan input instead of reducing pairs to symbol strings.
-- [ ] Resolve BTC/EUR rates through the same public exchange adapter and cache them for the scan.
+- [ ] Add one shared direct/inverse bid/ask conversion helper with finite-positive validation.
+- [ ] Implement Binance market discovery from `exchangeInfo`; prefer `ASSETUSDT`, then `ASSETUSDC`, then `ASSETUSD`, with inverse fallbacks.
+- [ ] Implement Kraken market discovery from `AssetPairs`, including `XBT`/`XXBT` and `ZUSD` normalization; prefer direct USD/USDT markets.
+- [ ] Implement OKX SPOT market discovery from `public/instruments`; support BTC direct markets and EUR inverse markets without routing conversion symbols through the scanned-quote allowlist.
+- [ ] Cache one resolved conversion rate per exchange and quote asset for the scan.
 - [ ] Log and skip a candidate when its required conversion rate is unavailable; never compare native BTC/EUR values with a dollar threshold.
 - [ ] Run `uv run pytest -q tests/test_quote_value_service.py tests/test_b_volume_alerts_exchange_scanning.py`; expect passes.
 

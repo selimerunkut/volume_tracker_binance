@@ -1,49 +1,79 @@
-# EUR Volume Conversion Design
+# Universal Quote-to-USD Volume Conversion Design
 
 ## Goal
 
-Evaluate OKX EUR-quoted volume alerts against the existing USD threshold instead of dropping every EUR pair when `EUR-USDT` is unavailable.
+Evaluate quote-denominated volume against the existing USD alert threshold for every currently supported exchange: Binance, Kraken, and OKX.
 
 ## Scope
 
-- Convert EUR quote volume to USD before applying `volume_alert_min_current_quote_usd`.
-- Reuse one cached EUR/USD rate across a scan run.
-- Preserve the current fail-closed behavior when no trustworthy rate is available.
-- Do not add a dependency, external FX provider, Telegram FX command, or persistent FX configuration in this change.
+- Convert non-stable quote volume to USD before applying `volume_alert_min_current_quote_usd`.
+- Keep stable quotes (`USD`, `USDC`, `USDT`) at the existing 1:1 USD assumption.
+- Give each exchange adapter responsibility for discovering its own valid conversion markets and symbol syntax.
+- Cache one resolved rate per quote asset for the duration of an exchange scan.
+- Preserve fail-closed behavior when no trustworthy conversion market exists.
+- Do not add Hyperliquid, external FX providers, new dependencies, Telegram FX commands, or persistent FX configuration.
 
-## Evidence
+## Research Evidence
 
-- The OKX API v5 public-instruments documentation defines `instId`, `baseCcy`, `quoteCcy`, and `state` for spot instruments and allows the live catalog to be discovered without authentication.
-- A live query to the same EEA endpoint used by this project on 2026-07-13 returned `USDT-EUR` and `USDC-EUR` as live spot instruments. It returned no live direct `EUR-USD`, `EUR-USDT`, or `EUR-USDC` instrument.
-- Live ticker snapshots returned approximately `0.8744 EUR/USDT` and `0.8751 EUR/USDC`. Therefore one EUR was approximately `1 / 0.8744 = 1.1436` USDT or `1 / 0.8751 = 1.1427` USDC at that time.
-- The current implementation only asks OKX for `EUR-USDT`, which is not a live instrument in that catalog. This directly explains the `no USD conversion for EUR` skips.
-- OKX documentation: <https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments>
+The repository currently registers only Binance, Kraken, and OKX in `src/exchanges/registry.py`. The active volume scan quote assets are:
 
-## Design
+| Exchange | Current scan quotes | Live conversion evidence checked 2026-07-13 |
+| --- | --- | --- |
+| Binance | `USDC`, `BTC` | `BTCUSDT` and `BTCUSDC` are `TRADING` in `/api/v3/exchangeInfo`. |
+| Kraken | `USD`, `BTC` | `XBTUSD` (`altname: XBTUSD`) and `XBTUSDT` are `online` in `/0/public/AssetPairs`. Kraken uses internal asset codes such as `XXBT` and `ZUSD`, while `altname`/`wsname` expose tradable pair names. |
+| OKX | `USDC`, `EUR`, `USD`, `BTC` | Live SPOT instruments include `BTC-USDT`, `BTC-USDC`, `USDT-EUR`, and `USDC-EUR`. No direct `EUR-USDT` instrument was returned. |
 
-`OKXExchange.quote_to_usd_rate()` will discover an exchange-native conversion rate from the live spot instruments. For EUR, it will try the currently available inverse instruments in deterministic order: `USDT-EUR`, then `USDC-EUR`. The conversion uses `1 / askPx`, because `askPx` is the EUR amount required to buy one unit of the stablecoin and is conservative for an alert-entry liquidity threshold.
+The current adapters already expose `quote_to_usd_rate`, but each assumes a single hardcoded pair. That is why OKX asks for nonexistent `EUR-USDT`, and why OKX's `BTC-USDT` probe is rejected by its current symbol normalizer. Binance and Kraken happen to work for BTC today, but they have no fallback or catalog validation.
 
-The scanner will cache the resolved rate by quote asset for the duration of one exchange scan so hundreds of EUR symbols do not trigger hundreds of identical ticker requests. This scan-local cache needs no expiry mechanism and cannot become stale across scans. Stable quote assets retain the existing `1.0` behavior.
+Official references:
 
-If every candidate is missing, invalid, non-finite, or non-positive, the adapter returns `None`. The scanner keeps its existing fail-closed behavior and logs that USD conversion is unavailable; it does not guess that EUR equals USD.
+- Binance Spot exchange information: <https://developers.binance.com/docs/binance-spot-api-docs/rest-api/general-endpoints#exchange-information>
+- Kraken tradable asset pairs: <https://docs.kraken.com/api/docs/rest-api/get-tradable-asset-pairs/>
+- Kraken ticker information: <https://docs.kraken.com/api/docs/rest-api/get-ticker-information/>
+- OKX public instruments: <https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments>
+
+## Shared Contract
+
+Keep `ExchangeAdapter.quote_to_usd_rate(quote_asset)` as the scanner-facing interface, returning a positive finite USD rate or `None`.
+
+The scanner maintains a local `{quote_asset: rate}` cache per exchange scan. It resolves a quote asset once, reuses that value for all candles and 24-hour volume enrichment, and logs the exchange, quote asset, and attempted conversion markets when resolution fails.
+
+The conversion helper applies the same market-side rules everywhere:
+
+- Direct market `ASSET-STABLE`: use the bid price as a conservative value for selling the quote asset.
+- Inverse market `STABLE-ASSET`: use `1 / ask price` as a conservative value for buying the stablecoin with the quote asset.
+- Ignore missing, non-numeric, non-finite, or non-positive prices.
+- Stable quote assets retain the current 1:1 assumption.
+
+## Exchange Adapter Resolution
+
+Adapters discover live markets using their existing public instrument metadata, then query a ticker only for the best candidate. Candidate preference is deterministic and favors USDT, then USDC, then USD.
+
+- Binance: discover direct `ASSETUSDT`, `ASSETUSDC`, or `ASSETUSD`, then inverse equivalents if needed. Use Binance `exchangeInfo` status to reject non-trading symbols and ticker bid/ask fields for valuation.
+- Kraken: discover direct or inverse pairs from `AssetPairs`, using `altname`/`wsname` and Kraken's asset-code mappings (`XBT`/`XXBT`, `ZUSD`). Prefer `XBTUSD`, then `XBTUSDT` for the currently scanned BTC quote.
+- OKX: discover live SPOT instruments from `public/instruments`. For BTC, prefer `BTC-USDT`, then `BTC-USDC`; for EUR, use `USDT-EUR`, then `USDC-EUR`, inverting the ask price. The resolver must not depend on the current `allowed_quote_assets` list to query a conversion market.
+
+This keeps exchange-specific API details inside adapters while the scanner and threshold logic remain exchange-agnostic.
 
 ## Data Flow
 
-1. The scanner requests the quote-to-USD rate for the first EUR symbol and stores it in a scan-local cache.
-2. The adapter probes `USDT-EUR`, followed by `USDC-EUR`, and returns the inverse ask price from the first valid ticker.
-3. Native EUR candle volumes and 24-hour quote volume are multiplied by that rate.
-4. The existing `$50,000` filter is applied to the USD-equivalent current candle volume.
-5. Any resulting alert continues to show USD-denominated volume and liquidity fields.
+1. The scanner reads the configured USD threshold once.
+2. For each exchange, it resolves and caches conversion rates by quote asset.
+3. Native candle quote volume is converted to USD using the cached rate.
+4. The existing baseline and minimum-current-volume gates run on USD values.
+5. The same rate converts 24-hour quote volume for alert enrichment.
+6. If conversion is unavailable, the pair is skipped with a precise diagnostic; no unconverted alert is emitted.
 
 ## Validation
 
-- A valid `USDT-EUR` ask price is inverted.
-- `USDC-EUR` is used when `USDT-EUR` is unavailable or invalid.
-- Invalid candidate prices are ignored.
-- All unavailable candidates return `None` and preserve fail-closed filtering.
-- Repeated conversions use the cache and do not repeat ticker calls.
-- Existing adapter and volume-alert tests remain green.
+- Unit-test the shared direct/inverse bid/ask math.
+- Test Binance discovery and BTC fallback behavior.
+- Test Kraken asset-code normalization and BTC direct/fallback behavior.
+- Test OKX BTC direct and EUR inverse behavior, including the current live pair directions.
+- Test invalid ticker data and unavailable markets remain fail-closed.
+- Test scan-local caching prevents repeated conversion ticker requests.
+- Run the existing adapter, volume-alert, and live-public-API tests where network access is available.
 
-## Deferred Options
+## Deferred
 
-An external reference-rate provider or manually configured fallback can be added later if OKX removes both usable EUR cross-pairs. It is intentionally excluded while the exchange itself provides sufficient live conversion markets.
+If a future exchange exposes a quote asset with no stablecoin or USD market, add that adapter's documented conversion route when the exchange is actually enabled. Do not silently use `quote == USD` or an external fallback without explicit evidence and a displayed estimate warning.
