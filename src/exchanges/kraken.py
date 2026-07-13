@@ -133,7 +133,7 @@ class KrakenExchange:
         pairs = self._conversion_pairs()
         candidates = []
         for key, item in pairs.items():
-            status = str(item.get('status', 'online')).lower()
+            status = str(item.get('status', '')).lower()
             if status != 'online':
                 continue
             base = str(item.get('base', '')).upper().replace('XXBT', 'XBT').replace('XBT', 'XBT')
