@@ -18,3 +18,9 @@ def test_market_buy_reports_insufficient_depth():
 def test_invalid_book_is_unavailable():
     result = analyze_entry_liquidity({'asks': [('bad', 1)]})
     assert result['unavailable'] is True
+
+
+def test_insufficient_depth_is_labeled_severe():
+    result = analyze_entry_liquidity({'asks': [(100, 10)]}, notionals=(3000, 5000, 10000))
+    assert result['unavailable'] is False
+    assert 'SEVERE' in result['summary']

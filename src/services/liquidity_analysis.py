@@ -45,16 +45,17 @@ def analyze_entry_liquidity(order_book, notionals=(3000, 5000, 10000)):
     unavailable = not order_book or not order_book.get('asks') or all(item['vwap'] is None for item in sizes.values())
     if unavailable:
         return {'unavailable': True, 'sizes': {int(size): estimate_market_buy([], size) for size in notionals}}
+    insufficient = any(item['insufficient_depth'] for item in sizes.values())
     worst = max(
         (item['slippage_pct'] if item['slippage_pct'] is not None else float('inf'))
         for item in sizes.values()
     )
-    if worst < 0.25:
+    if insufficient or worst >= 1.50:
+        label = '🚨 Liquidity: SEVERE — entry depth is thin'
+    elif worst < 0.25:
         label = '✅ Liquidity: GOOD'
     elif worst < 0.75:
         label = '⚠️ Liquidity: MODERATE — larger entries may move the price materially'
     elif worst < 1.50:
         label = '⚠️ Liquidity: HIGH — entries may move the price materially'
-    else:
-        label = '🚨 Liquidity: SEVERE — entry depth is thin'
     return {'unavailable': False, 'sizes': sizes, 'summary': label}
