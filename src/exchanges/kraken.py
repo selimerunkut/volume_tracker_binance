@@ -21,7 +21,25 @@ def _normalize_pair_name(pair_name):
 def _normalize_kraken_asset_name(asset_name):
     if not asset_name:
         return ''
-    return asset_name.replace('XBT', 'BTC').upper()
+    normalized = asset_name.upper()
+    # Kraken uses Z-prefixed fiat asset codes in AssetPairs (for example
+    # ZEUR/ZUSD), while the tracker exposes their standard ISO symbols.
+    normalized = {
+        'ZEUR': 'EUR',
+        'ZUSD': 'USD',
+        'ZGBP': 'GBP',
+        'ZCAD': 'CAD',
+        'ZAUD': 'AUD',
+        'ZCHF': 'CHF',
+        'ZJPY': 'JPY',
+    }.get(normalized, normalized)
+    if normalized == 'XXBT' or normalized == 'XBT':
+        return 'BTC'
+    if normalized.startswith('XX') and len(normalized) > 3:
+        return normalized[2:]
+    if normalized.startswith('X') and len(normalized) > 3:
+        return normalized[1:]
+    return normalized
 
 
 def _kraken_trade_slug(symbol):
@@ -127,7 +145,7 @@ class KrakenExchange:
         return float(ticker['v'][1]) * float(ticker['p'][1])
 
     def quote_to_usd_rate(self, quote_asset):
-        asset = str(quote_asset).upper().replace('BTC', 'XBT')
+        asset = _normalize_kraken_asset_name(quote_asset)
         if asset in {'USD', 'USDC', 'USDT'}:
             return 1.0
         pairs = self._conversion_pairs()
@@ -136,8 +154,8 @@ class KrakenExchange:
             status = str(item.get('status', '')).lower()
             if status != 'online':
                 continue
-            base = str(item.get('base', '')).upper().replace('XXBT', 'XBT').replace('XBT', 'XBT')
-            quote = str(item.get('quote', '')).upper().replace('ZUSD', 'USD').replace('XXBT', 'XBT').replace('XBT', 'XBT')
+            base = _normalize_kraken_asset_name(item.get('base', ''))
+            quote = _normalize_kraken_asset_name(item.get('quote', ''))
             altname = str(item.get('altname') or key).upper()
             if base == asset and quote in {'USD', 'USDT', 'USDC'}:
                 candidates.append((altname, False))

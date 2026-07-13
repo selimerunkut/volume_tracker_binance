@@ -97,6 +97,24 @@ def test_kraken_adapter_filters_quote_assets_from_wsname(monkeypatch):
     assert [pair.symbol for pair in btc_pairs] == ['ETHXBT']
 
 
+def test_kraken_quote_to_usd_normalizes_prefixed_fiat_assets(monkeypatch):
+    payloads = [
+        FakeResponse({'result': {
+            'ZEURZUSD': {
+                'altname': 'EURUSD',
+                'base': 'ZEUR',
+                'quote': 'ZUSD',
+                'status': 'online',
+            },
+        }}),
+        FakeResponse({'result': {'EURUSD': {'b': ['1.10'], 'a': ['1.11']}}}),
+    ]
+
+    monkeypatch.setattr('src.exchanges.kraken.requests.get', lambda *args, **kwargs: payloads.pop(0))
+
+    assert KrakenExchange().quote_to_usd_rate('EUR') == 1.10
+
+
 def test_okx_adapter_normalizes_symbols_and_reverses_candles(monkeypatch):
     instruments_payload = {
         'code': '0',
