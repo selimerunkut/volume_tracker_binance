@@ -29,7 +29,9 @@ This plan applies to all exchanges currently registered by the signal tool. It d
 | Kraken | `USD`, `BTC` | `XBTUSD`, then `XBTUSDT`, both `online` via `/0/public/AssetPairs`; Kraken internal codes are normalized from `XXBT`/`ZUSD`. |
 | OKX | `USDC`, `EUR`, `USD`, `BTC` | `BTC-USDT`, then `BTC-USDC`; `USDT-EUR`, then `USDC-EUR` inverse markets via `/api/v5/public/instruments`. |
 
-Conversion is exchange-specific behind the shared `quote_to_usd_rate(quote_asset)` interface. Direct `ASSET-STABLE` markets use a conservative bid; inverse `STABLE-ASSET` markets use `1 / ask`. Stable quotes retain the existing 1:1 USD assumption. The scanner caches one rate per quote asset for each exchange scan and fails closed if no live conversion market is available.
+Conversion is exchange-specific behind the shared `quote_to_usd_rate(quote_asset)` interface. Direct `ASSET-STABLE` markets use a conservative bid; inverse `STABLE-ASSET` markets use `1 / ask`. Binance bid/ask comes from `bookTicker`; Kraken uses ticker `b`/`a`; OKX uses ticker bid/ask. Stable quotes retain the existing 1:1 USD assumption. The scanner caches one rate per quote asset for each exchange scan, including failed lookups, and fails closed if no exact active conversion market is available.
+
+For OKX SPOT 24-hour ticker enrichment, read `volCcy24h` (quote-currency volume) from `/api/v5/market/ticker`. Keep `volCcyQuote` for candle quote volume only; these fields are not interchangeable.
 
 Primary API references: [Binance exchange information](https://developers.binance.com/docs/binance-spot-api-docs/rest-api/general-endpoints#exchange-information), [Kraken tradable asset pairs](https://docs.kraken.com/api/docs/rest-api/get-tradable-asset-pairs/), and [OKX public instruments](https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments).
 
@@ -131,14 +133,14 @@ def to_usd_quote_value(native_quote_value, quote_asset, usd_rate):
     """Pure multiplication with positive finite-number validation."""
 ```
 
-- [ ] Test stable quotes (`USD`, `USDC`, `USDT`) at rate `1.0`, BTC/EUR conversion, invalid inputs, missing rates, and one cached conversion lookup per exchange/quote asset per scan.
+- [ ] Test stable quotes (`USD`, `USDC`, `USDT`) at rate `1.0`, BTC/EUR conversion, invalid inputs, missing rates, direct-bid and inverse-`1 / ask` math, and one cached conversion lookup per exchange/quote asset per scan.
 - [ ] Run `uv run pytest -q tests/test_quote_value_service.py`; expect failure before implementation.
 - [ ] Keep `ExchangeSymbol.quote_asset` in the scan input instead of reducing pairs to symbol strings.
 - [ ] Add one shared direct/inverse bid/ask conversion helper with finite-positive validation.
-- [ ] Implement Binance market discovery from `exchangeInfo`; prefer `ASSETUSDT`, then `ASSETUSDC`, then `ASSETUSD`, with inverse fallbacks.
-- [ ] Implement Kraken market discovery from `AssetPairs`, including `XBT`/`XXBT` and `ZUSD` normalization; prefer direct USD/USDT markets.
-- [ ] Implement OKX SPOT market discovery from `public/instruments`; support BTC direct markets and EUR inverse markets without routing conversion symbols through the scanned-quote allowlist.
-- [ ] Cache one resolved conversion rate per exchange and quote asset for the scan.
+- [ ] Implement Binance market discovery from `exchangeInfo`; require exact base/quote matching and `TRADING` status; prefer `ASSETUSDT`, then `ASSETUSDC`, then `ASSETUSD`, with inverse fallbacks; fetch bid/ask from `bookTicker`.
+- [ ] Implement Kraken market discovery from `AssetPairs`, require exact normalized base/quote and `online` status, including `XBT`/`XXBT` and `ZUSD` normalization; treat `XBTUSDT` as a catalog-discovered fallback and use ticker `b`/`a`.
+- [ ] Implement OKX SPOT market discovery from a cached `public/instruments` catalog; require `instType=SPOT`, exact base/quote, and `state=live`; support BTC direct markets and EUR inverse markets without routing conversion symbols through the scanned-quote allowlist.
+- [ ] Cache one resolved conversion rate per exchange and quote asset for the scan, including `None` failures.
 - [ ] Log and skip a candidate when its required conversion rate is unavailable; never compare native BTC/EUR values with a dollar threshold.
 - [ ] Run `uv run pytest -q tests/test_quote_value_service.py tests/test_b_volume_alerts_exchange_scanning.py`; expect passes.
 
@@ -224,7 +226,7 @@ def estimate_market_buy(asks, quote_notional):
 - [ ] Run adapter and liquidity tests; expect failures for missing interfaces.
 - [ ] Implement public `fetch_order_book` and `fetch_24h_quote_volume` methods on each adapter using existing request/time-out patterns.
 - [ ] Implement one ask-side traversal. Do not add sell/exit simulation, fee modeling, authenticated endpoints, or historical depth storage.
-- [ ] Calculate slippage against the best ask. Keep raw metrics and use fixed display bands: `GOOD < 0.25%`, `MODERATE < 0.75%`, `HIGH < 1.50%`, `SEVERE >= 1.50%` or insufficient depth.
+- [ ] Calculate slippage against the best ask. Keep raw metrics and use fixed product heuristics for display bands: `GOOD < 0.25%`, `MODERATE < 0.75%`, `HIGH < 1.50%`, `SEVERE >= 1.50%` or insufficient depth. Document these bands as heuristics, not exchange or research guarantees.
 - [ ] Run `uv run pytest -q tests/test_exchange_adapters.py tests/test_liquidity_analysis.py`; expect passes.
 
 ## Task 7: Enrich Qualified Alerts Only
@@ -274,7 +276,7 @@ uv run pytest -q \
 - No Telegram settings wizard, inline keyboard, command aliases, or reset command.
 - No configurable `$3k/$5k/$10k` trade sizes or risk bands.
 - No sell-side/exit simulation, fees, authenticated trading, market orders, depth history, or predictive price-impact model.
-- No stablecoin depeg feed; USD, USDC, and USDT are treated as `$1` for this alert filter.
+- No stablecoin depeg feed; USD, USDC, and USDT are treated as `$1` for this alert filter, with the accepted risk that this approximation can be wrong during a depeg.
 
 ## Completion Evidence
 
