@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .altseason_service import get_latest as get_altseason
 from .db_service import save_suggestion
 from .deterministic_strategy import evaluate_strategy
+from .regime_service import get_regimes_at
 from .market_data_service import fetch_klines, get_current_price
 from .news_service import get_latest_news
 from .technical_analysis import calculate_indicators, get_latest_indicators
@@ -63,6 +65,26 @@ def analyze_and_suggest(symbol: str, exchange_name: str = "binance") -> dict[str
             "rule_ids": strategy["rule_ids"],
             "news_items": news_items,
         }
+        try:
+            regimes = get_regimes_at()
+            analysis_data["btc_market_regime"] = {
+                venue: {
+                    key: value for key, value in regime.items()
+                    if key in {"status", "direction", "raw_direction", "volatility", "volume_tag", "date"}
+                }
+                for venue, regime in regimes.items()
+            }
+        except Exception as regime_error:
+            logger.warning("BTC regime lookup failed: %s", regime_error)
+            analysis_data["btc_market_regime"] = {
+                "okx": {"status": "unknown/stale"},
+                "kraken": {"status": "unknown/stale"},
+            }
+        try:
+            analysis_data["cmc_altseason_index"] = get_altseason()
+        except Exception as altseason_error:
+            logger.warning("Altseason lookup failed: %s", altseason_error)
+            analysis_data["cmc_altseason_index"] = {"status": "unknown/stale", "altcoin_index": None}
 
         suggestion_id = save_suggestion(
             symbol=symbol,
@@ -73,7 +95,7 @@ def analyze_and_suggest(symbol: str, exchange_name: str = "binance") -> dict[str
             reasoning=strategy["reasoning"],
             analysis_data=analysis_data,
         )
-        return {**strategy, "suggestion_id": suggestion_id}
+        return {**strategy, "suggestion_id": suggestion_id, "analysis_data": analysis_data}
     except Exception as exc:
         logger.error(
             "Deterministic analysis failed for %s on %s: %s",

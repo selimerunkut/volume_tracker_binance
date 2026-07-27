@@ -4,7 +4,7 @@ import asyncio
 import html
 import logging
 import inspect
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.error import BadRequest, TelegramError
@@ -18,6 +18,7 @@ from src.services.strategy_advisor import analyze_and_suggest
 from src.services.llm_strategy import analyze_and_suggest as legacy_analyze_and_suggest
 from src.services.llm_strategy import analyze_and_suggest as deepseek_analyze_and_suggest
 from src.services.performance_tracker import track_performance
+from src.services.regime_service import run_all as run_regime_labeler
 from src.services.db_service import get_performance_stats, init_db, get_suggestion_details, get_setting, set_setting
 from src.services.db_service import get_suggestions_between_dates, get_last_analyzed_symbols
 from src.services.alert_preferences import (
@@ -380,6 +381,24 @@ def format_strategy_message(strategy, symbol, exchange_name, label):
         )
 
     response += f"<b>Reasoning</b>: {reasoning}"
+    analysis_data = strategy.get('analysis_data') or {}
+    regimes = analysis_data.get('btc_market_regime') or {}
+    response += "\n\n<b>BTC market regime</b>:"
+    for venue in ('okx', 'kraken'):
+        regime = regimes.get(venue) or {"status": "unknown/stale"}
+        if regime.get('status') != 'ok':
+            response += f"\n{venue.upper()}: unknown/stale"
+        else:
+            response += (
+                f"\n{venue.upper()}: {html.escape(str(regime.get('direction', 'unknown')))} · "
+                f"vol {html.escape(str(regime.get('volatility', 'unknown')))} · "
+                f"volume {html.escape(str(regime.get('volume_tag', 'unknown')))}"
+            )
+    altseason = analysis_data.get('cmc_altseason_index') or {}
+    if altseason.get('status') == 'ok':
+        response += f"\nAltcoin season index: {altseason.get('altcoin_index')} ({html.escape(str(altseason.get('bucket', 'neutral')))})"
+    else:
+        response += "\nAltcoin season index: unknown/stale"
     return response
 
 
@@ -1479,6 +1498,10 @@ async def run_daily_signals(context: ContextTypes.DEFAULT_TYPE) -> None:
     signal_service.bot_context = context
     await signal_service.check_signals(timeframe='1d')
 
+async def run_regime_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    print(f"[{datetime.now()}] Running daily BTC regime labeler...")
+    await asyncio.to_thread(run_regime_labeler)
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors and Telegram API conflicts."""
     logger.error(f"Bot error: {context.error}", exc_info=context.error)
@@ -1535,6 +1558,7 @@ def main() -> None:
     daily_interval = 180 if test_mode else 86400
     job_queue.run_repeating(run_hourly_signals, interval=hourly_interval, first=20)
     job_queue.run_repeating(run_daily_signals, interval=daily_interval, first=30)
+    job_queue.run_daily(run_regime_job, time=time(hour=0, minute=5, tzinfo=timezone.utc))
 
     # Run the bot until the user presses Ctrl-C
     print(f"[{datetime.now()}] Telegram bot started with Deterministic Strategy Advisor. Listening for updates...")

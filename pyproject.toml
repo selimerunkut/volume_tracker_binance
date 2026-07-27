@@ -10,6 +10,7 @@ dependencies = [
     "python-telegram-bot[job-queue]",
     "feedparser",
     "pandas-ta",
+    "pyarrow",
     "openai",
 ]
 requires-python = ">=3.12"

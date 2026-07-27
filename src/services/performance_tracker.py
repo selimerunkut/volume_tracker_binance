@@ -1,7 +1,7 @@
 """
 Performance Tracker - Evaluates trade outcomes and updates database
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from .db_service import (
     get_pending_suggestions,
     update_outcome,
@@ -9,7 +9,7 @@ from .db_service import (
     get_pending_signal_trades,
     update_signal_trade_outcome,
 )
-from .market_data_service import get_current_price
+from .market_data_service import fetch_klines, get_current_price
 
 
 def calculate_pnl(entry_price, exit_price, trade_type):
@@ -128,6 +128,57 @@ def evaluate_signal_trade(signal, current_price):
     return 'EXPIRED', pnl
 
 
+def evaluate_candle_path(suggestion, klines, now=None):
+    """Evaluate TP/SL using candle highs/lows with a deterministic SL-first tie break."""
+    now = now or datetime.now()
+    created_at = datetime.fromisoformat(suggestion['created_at'])
+    if created_at.tzinfo is not None:
+        created_at = created_at.astimezone(timezone.utc).replace(tzinfo=None)
+    window_end = created_at + timedelta(hours=24)
+    action = suggestion['strategy_type']
+    frame = klines.copy() if klines is not None else None
+    if frame is None or frame.empty:
+        return 'PENDING', None
+    def normalize_timestamp(value):
+        value = value.to_pydatetime() if hasattr(value, 'to_pydatetime') else value
+        if getattr(value, 'tzinfo', None) is not None:
+            value = value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+
+    frame['timestamp'] = frame['timestamp'].apply(normalize_timestamp)
+    frame = frame.sort_values('timestamp')
+    frame = frame[(frame['timestamp'] > created_at) & (frame['timestamp'] <= min(now, window_end))]
+    if action == 'WAIT':
+        if now < window_end:
+            return 'PENDING', None
+        close = float(frame.iloc[-1]['close']) if not frame.empty else float(suggestion['entry_price'])
+        pct_change = ((close - float(suggestion['entry_price'])) / float(suggestion['entry_price'])) * 100
+        if pct_change >= WAIT_MOVE_THRESHOLD_PERCENT:
+            return 'LOSS', round(-pct_change, 2)
+        if pct_change <= -WAIT_MOVE_THRESHOLD_PERCENT:
+            return 'WIN', round(-pct_change, 2)
+        return 'WIN', 0
+    for _, candle in frame.iterrows():
+        high = float(candle['high'])
+        low = float(candle['low'])
+        tp = float(suggestion['take_profit'])
+        sl = float(suggestion['stop_loss'])
+        if action == 'LONG':
+            if low <= sl:
+                return 'LOSS', calculate_pnl(float(suggestion['entry_price']), sl, 'LONG')
+            if high >= tp:
+                return 'WIN', calculate_pnl(float(suggestion['entry_price']), tp, 'LONG')
+        else:
+            if high >= sl:
+                return 'LOSS', calculate_pnl(float(suggestion['entry_price']), sl, 'SHORT')
+            if low <= tp:
+                return 'WIN', calculate_pnl(float(suggestion['entry_price']), tp, 'SHORT')
+    if now >= window_end and not frame.empty:
+        close = float(frame.iloc[-1]['close'])
+        return 'EXPIRED', calculate_pnl(float(suggestion['entry_price']), close, action)
+    return 'PENDING', None
+
+
 def track_performance():
     """
     Main function to track and update all pending trades.
@@ -152,11 +203,13 @@ def track_performance():
         exchange_name = analysis_data.get('exchange_name', 'binance')
         
         try:
-            # Get current price
+            # Use candle highs/lows so intra-hour TP/SL touches are not missed.
             current_price = get_current_price(symbol, exchange_name=exchange_name)
-            
-            # Evaluate trade
-            status, pnl = evaluate_trade(suggestion, current_price)
+            klines = fetch_klines(symbol, interval='1h', limit=72, exchange_name=exchange_name)
+            if klines is None or klines.empty:
+                status, pnl = evaluate_trade(suggestion, current_price)
+            else:
+                status, pnl = evaluate_candle_path(suggestion, klines)
             
             if status != 'PENDING':
                 # Update database

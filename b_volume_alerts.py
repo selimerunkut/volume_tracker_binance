@@ -22,6 +22,7 @@ from src.services.quote_value_service import to_usd_quote_value
 from src.services.liquidity_analysis import analyze_entry_liquidity
 from src.services.binance_permissions_service import permissions_service
 from src.services.db_service import get_setting
+from src.services.auto_signal_service import create_auto_signal
 
 
 # File to store the state of sent alerts
@@ -255,6 +256,11 @@ def scan_exchange(exchange, symbol_manager, excluded_symbols, dry_run, alerts_en
                 if is_duplicate_alert(exchange.name, symbol, level, curr_volume):
                     # The DEBUG print inside is_duplicate_alert is sufficient
                     continue # Skip sending this alert
+
+                try:
+                    create_auto_signal(symbol, exchange.name)
+                except Exception as auto_error:
+                    print(f"[{datetime.datetime.now()}] Auto-signal failed for {exchange.name} {symbol}: {auto_error}")
 
                 if not alerts_enabled:
                     print(f"[{datetime.datetime.now()}] Skipping Telegram message for {symbol} - Alerts are DISABLED in settings.")

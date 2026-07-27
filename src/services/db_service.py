@@ -11,9 +11,10 @@ DB_PATH = os.path.join(PROJECT_ROOT, 'trading_memory.db')
 
 
 def get_connection():
-    """Get database connection."""
-    conn = sqlite3.connect(DB_PATH)
+    """Get a SQLite connection configured for the bot's multiple writers."""
+    conn = sqlite3.connect(DB_PATH, timeout=5)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -45,8 +46,52 @@ def init_db():
             status TEXT DEFAULT 'PENDING',  -- PENDING, WIN, LOSS, EXPIRED
             pnl_percent REAL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            analysis_data TEXT
+            analysis_data TEXT,
+            source TEXT DEFAULT 'manual',
+            exchange_name TEXT,
+            resolved_at TEXT
         )
+    ''')
+
+    for column, definition in (
+        ('source', "TEXT DEFAULT 'manual'"),
+        ('exchange_name', 'TEXT'),
+        ('resolved_at', 'TEXT'),
+    ):
+        try:
+            cursor.execute(f'ALTER TABLE suggestions ADD COLUMN {column} {definition}')
+        except sqlite3.OperationalError:
+            pass
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS regime_labels (
+            venue TEXT NOT NULL,
+            instrument TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            date TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            raw_direction TEXT NOT NULL,
+            volatility TEXT NOT NULL,
+            volume_tag TEXT NOT NULL,
+            computed_at TEXT NOT NULL,
+            contract_sha256 TEXT NOT NULL,
+            validation_result TEXT NOT NULL,
+            source_rows INTEGER NOT NULL,
+            source_first_ts TEXT NOT NULL,
+            source_last_ts TEXT NOT NULL,
+            source_completed_through TEXT NOT NULL,
+            source_sha256 TEXT NOT NULL,
+            PRIMARY KEY (venue, instrument, timeframe, date)
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_regime_labels_lookup
+        ON regime_labels (venue, instrument, timeframe, date)
+    ''')
+    cursor.execute('''
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_auto_symbol_exchange
+        ON suggestions (symbol, exchange_name)
+        WHERE status = 'PENDING' AND source = 'auto'
     ''')
 
     cursor.execute('''
@@ -135,7 +180,7 @@ def set_chat_setting(chat_id, key, value):
     return value
 
 
-def save_suggestion(symbol, strategy_type, entry_price, take_profit, stop_loss, reasoning, analysis_data=None):
+def save_suggestion(symbol, strategy_type, entry_price, take_profit, stop_loss, reasoning, analysis_data=None, source='manual', exchange_name=None):
     """
     Save a new trade suggestion.
     
@@ -148,9 +193,9 @@ def save_suggestion(symbol, strategy_type, entry_price, take_profit, stop_loss, 
     analysis_json = json.dumps(analysis_data) if analysis_data is not None else None
 
     cursor.execute('''
-        INSERT INTO suggestions 
-        (timestamp, symbol, strategy_type, entry_price, take_profit, stop_loss, reasoning, analysis_data)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO suggestions
+        (timestamp, symbol, strategy_type, entry_price, take_profit, stop_loss, reasoning, analysis_data, source, exchange_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         datetime.now().isoformat(),
         symbol.upper(),
@@ -159,7 +204,9 @@ def save_suggestion(symbol, strategy_type, entry_price, take_profit, stop_loss, 
         take_profit,
         stop_loss,
         reasoning,
-        analysis_json
+        analysis_json,
+        source,
+        exchange_name or (analysis_data or {}).get('exchange_name')
     ))
     
     suggestion_id = cursor.lastrowid
@@ -289,10 +336,10 @@ def update_outcome(suggestion_id, status, pnl_percent=None):
     cursor = conn.cursor()
     
     cursor.execute('''
-        UPDATE suggestions 
-        SET status = ?, pnl_percent = ?
+        UPDATE suggestions
+        SET status = ?, pnl_percent = ?, resolved_at = ?
         WHERE id = ?
-    ''', (status, pnl_percent, suggestion_id))
+    ''', (status, pnl_percent, datetime.now().isoformat(), suggestion_id))
     
     conn.commit()
     conn.close()

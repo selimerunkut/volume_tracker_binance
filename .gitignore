@@ -19,6 +19,7 @@ uv.lock
 bot.log
 trading_memory.db
 macro_cache.json
+altseason_cache.json
 volume.log
 .sisyphus/boulder.json
 
