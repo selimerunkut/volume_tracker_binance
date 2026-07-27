@@ -16,6 +16,7 @@ VENUE_CONTRACTS = {
     "okx": "fixed-stake-structural-regime-contract-v1-okx",
     "kraken": "fixed-stake-structural-regime-contract-v1-kraken",
 }
+MIN_DAILY_ROWS = 120  # enough warm-up for rv75 while allowing live feeds with limited history
 
 
 def _utc_now():
@@ -108,8 +109,8 @@ def build_daily(frame, allowed_incomplete_dates=()):
     missing = expected.difference(daily.index).difference(pd.DatetimeIndex(list(allowed), tz="UTC"))
     if len(missing):
         raise ValueError(f"missing daily candles: {missing[:10].tolist()}")
-    if len(daily) < 400:
-        raise ValueError("at least 400 completed daily candles are required")
+    if len(daily) < MIN_DAILY_ROWS:
+        raise ValueError(f"at least {MIN_DAILY_ROWS} completed daily candles are required")
     return daily
 
 
