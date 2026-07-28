@@ -93,3 +93,42 @@ No real Telegram message should be sent. This is a local/server-side automated s
 - Every returned label is strictly before its event timestamp.
 - Current live lookups still correctly enforce the seven-day freshness rule.
 - Telegram output identifies the calculation-data date and age when regime context is present.
+
+## Execution results
+
+Executed on bagent against the current Feather files on 2026-07-28 UTC. No Telegram messages were sent.
+
+### Source and label generation
+
+- OKX source: 4,341 hourly rows; source ends `2026-07-20 20:00 UTC`; 180 labels through `2026-07-19`.
+- Kraken source: 5,202 hourly rows; source ends `2026-07-06 21:00 UTC`; 215 labels through `2026-07-05`.
+- Kraken complete post-gap data from `2026-06-03` through `2026-07-05` was included.
+- Kraken produced no labels for the excluded interval `2026-04-02` through `2026-06-02`.
+- Kraken's first post-gap label was `2026-06-03`; direction state was reset at the gap boundary.
+
+### Historical event lookups
+
+All labels were strictly before the event timestamp:
+
+| Event | OKX label | Kraken label | Result |
+|---|---|---|---|
+| `2026-03-30 12:00 UTC` | `2026-03-29`, `range_or_transition` | `2026-03-29`, `range_or_transition` | PASS |
+| `2026-05-15 12:00 UTC` | `2026-05-14`, `range_or_transition` | `2026-04-01`, `range_or_transition` | PASS: no post-gap data was used |
+| `2026-07-01 12:00 UTC` | `2026-06-30`, `structural_bear` | `2026-06-30`, `structural_bear` | PASS: post-gap data was used |
+
+For an event inside the missing interval, the current strict-before lookup carries the last valid pre-gap label. It never carries a future post-gap label. If the product decision changes to fail closed for events inside an unresolved gap, that is a separate lookup-policy change.
+
+### Message interception
+
+The same `format_strategy_message()` path used by `/a` was exercised with the historical results. The rendered output contained the expected `as of` dates. Current live lookup returned `unknown/stale` for both venues with source dates `2026-07-19` (OKX) and `2026-07-05` (Kraken). Comparison-model formatting contained no duplicate BTC-regime or altseason sections.
+
+### Verification status
+
+- Historical replay: PASS.
+- Strict-before-event checks: PASS.
+- Kraken temporary-gap behavior: PASS.
+- Post-gap Kraken data usage: PASS.
+- Current live freshness behavior: PASS.
+- Intercepted message formatting: PASS.
+- Local non-e2e suite: 103 passed, 3 deselected.
+- No product code changes were required after the final deployed gap-boundary correction (`fac6184` plus the already deployed formatter changes).
