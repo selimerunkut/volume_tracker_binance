@@ -360,6 +360,20 @@ def format_analysis_details_message(details):
     return message
 
 
+def _format_regime_data_age(regime):
+    completed_through = regime.get('source_completed_through')
+    if not completed_through:
+        return ""
+    age_days = regime.get('source_age_days')
+    if age_days is None:
+        return f" · calculation data through {html.escape(str(completed_through)[:10])}"
+    unit = "day" if int(age_days) == 1 else "days"
+    return (
+        f" · calculation data through {html.escape(str(completed_through)[:10])}"
+        f" ({int(age_days)} {unit} behind today)"
+    )
+
+
 def format_strategy_message(strategy, symbol, exchange_name, label):
     action = html.escape(str(strategy.get('action', 'N/A')))
     confidence = strategy.get('confidence', 0)
@@ -386,14 +400,16 @@ def format_strategy_message(strategy, symbol, exchange_name, label):
     response += "\n\n<b>BTC market regime</b>:"
     for venue in ('okx', 'kraken'):
         regime = regimes.get(venue) or {"status": "unknown/stale"}
+        data_age = _format_regime_data_age(regime)
         if regime.get('status') != 'ok':
-            response += f"\n{venue.upper()}: unknown/stale"
+            response += f"\n{venue.upper()}: unknown/stale{data_age}"
         else:
             response += (
                 f"\n{venue.upper()}: {html.escape(str(regime.get('direction', 'unknown')))} · "
                 f"vol {html.escape(str(regime.get('volatility', 'unknown')))} · "
                 f"volume {html.escape(str(regime.get('volume_tag', 'unknown')))}"
                 + (f" · as of {html.escape(str(regime.get('date', ''))[:10])}" if regime.get('date') else "")
+                + data_age
             )
     altseason = analysis_data.get('cmc_altseason_index') or {}
     if altseason.get('status') == 'ok':

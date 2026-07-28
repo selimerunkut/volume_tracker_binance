@@ -141,7 +141,11 @@ def get_regimes_at(event_ts=None):
                     completed = pd.Timestamp(row["source_completed_through"])
                     age_days = (pd.Timestamp.now(tz="UTC").normalize() - completed.normalize()).days
                     if age_days > 7:
-                        result[venue] = {"status": "unknown/stale", "source_age_days": age_days}
+                        result[venue] = {
+                            "status": "unknown/stale",
+                            "source_age_days": age_days,
+                            "source_completed_through": row["source_completed_through"],
+                        }
                         continue
                     result[venue]["source_age_days"] = age_days
                 result[venue]["status"] = "ok"

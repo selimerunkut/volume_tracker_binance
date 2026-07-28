@@ -70,7 +70,7 @@ def analyze_and_suggest(symbol: str, exchange_name: str = "binance") -> dict[str
             analysis_data["btc_market_regime"] = {
                 venue: {
                     key: value for key, value in regime.items()
-                    if key in {"status", "direction", "raw_direction", "volatility", "volume_tag", "date"}
+                    if key in {"status", "direction", "raw_direction", "volatility", "volume_tag", "date", "source_age_days", "source_completed_through"}
                 }
                 for venue, regime in regimes.items()
             }
