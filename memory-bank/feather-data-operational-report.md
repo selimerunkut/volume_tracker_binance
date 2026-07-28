@@ -38,7 +38,7 @@ For each venue, the updater must:
 5. It may leave the current UTC day partial. The labeler discards that day.
 6. Record row count, first/last timestamp, SHA-256, and incomplete/missing-day diagnostics in its job log.
 7. Not mutate the file while the labeler is reading it.
-8. Keep the source at least within the accepted freshness window: one week old is acceptable; older artifacts fail closed.
+8. Keep the source within the accepted freshness window for live use: one week old is acceptable; older artifacts produce `unknown/stale` for the live snapshot. Older artifacts may still be calculated for historical labels and backfills.
 
 The labeler does **not** need to wait for today's final hourly candle. It uses the latest completed UTC day. A weekly update is therefore compatible with the causal algorithm, provided the source is no more than seven days behind and the displayed label includes its `date`/as-of timestamp.
 
@@ -78,9 +78,11 @@ Return one report containing:
 - whether the update used an atomic replacement;
 - any Kraken temporary-gap status.
 
-The CEX labeler should then produce either:
+The CEX labeler should calculate all valid historical labels available in the artifact. For the live snapshot it should then produce either:
 
-- a per-venue label with an explicit `date`/as-of timestamp; or
-- `unknown/stale` with the validation reason.
+- a per-venue label with an explicit `date`/as-of timestamp when the source is no more than seven days old; or
+- `unknown/stale` with the source age when it is older than seven days.
+
+An old source is not discarded merely because its newest seven days are missing.
 
 Never hide stale, changing, or incomplete source data behind a successful-looking regime label.

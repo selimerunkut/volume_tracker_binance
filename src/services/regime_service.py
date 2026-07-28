@@ -36,10 +36,13 @@ def _source_path(venue):
 def run_venue(venue, require_freshness=True):
     venue = venue.lower()
     path = _source_path(venue)
+    # Always calculate labels from the available historical artifact. The
+    # freshness flag controls whether the returned snapshot is live-usable;
+    # it must not discard otherwise valid historical calculations.
     labels, metadata = label_file(
         path,
         venue,
-        require_freshness=require_freshness,
+        require_freshness=False,
         ignored_dates=TEMPORARY_IGNORED_DATES.get(venue, set()),
     )
     if TEMPORARY_IGNORED_DATES.get(venue):
@@ -83,9 +86,11 @@ def run_venue(venue, require_freshness=True):
     finally:
         conn.close()
     snapshot = current_snapshot(labels)
-    if snapshot.get("status") == "ok":
-        snapshot["source_age_days"] = max(0, (datetime.now(timezone.utc).date() - pd.Timestamp(snapshot["date"]).date()).days)
-    logger.info("Regime %s updated through %s: %s", venue, metadata["source_completed_through"], snapshot)
+    source_age_days = max(0, (datetime.now(timezone.utc).date() - pd.Timestamp(metadata["source_completed_through"]).date()).days)
+    snapshot["source_age_days"] = source_age_days
+    if require_freshness and source_age_days > 7:
+        snapshot = {"status": "unknown/stale", "source_age_days": source_age_days}
+    logger.info("Regime %s calculated through %s: %s", venue, metadata["source_completed_through"], snapshot)
     return snapshot
 
 
