@@ -396,26 +396,30 @@ def format_strategy_message(strategy, symbol, exchange_name, label):
 
     response += f"<b>Reasoning</b>: {reasoning}"
     analysis_data = strategy.get('analysis_data') or {}
-    regimes = analysis_data.get('btc_market_regime') or {}
-    response += "\n\n<b>BTC market regime</b>:"
-    for venue in ('okx', 'kraken'):
-        regime = regimes.get(venue) or {"status": "unknown/stale"}
-        data_age = _format_regime_data_age(regime)
-        if regime.get('status') != 'ok':
-            response += f"\n{venue.upper()}: unknown/stale{data_age}"
+    # Only the deterministic strategy carries the grounded macro context.
+    # Comparison models do not, so do not append misleading duplicate
+    # unknown/stale sections to their messages.
+    if 'btc_market_regime' in analysis_data or 'cmc_altseason_index' in analysis_data:
+        regimes = analysis_data.get('btc_market_regime') or {}
+        response += "\n\n<b>BTC market regime</b>:"
+        for venue in ('okx', 'kraken'):
+            regime = regimes.get(venue) or {"status": "unknown/stale"}
+            data_age = _format_regime_data_age(regime)
+            if regime.get('status') != 'ok':
+                response += f"\n{venue.upper()}: unknown/stale{data_age}"
+            else:
+                response += (
+                    f"\n{venue.upper()}: {html.escape(str(regime.get('direction', 'unknown')))} · "
+                    f"vol {html.escape(str(regime.get('volatility', 'unknown')))} · "
+                    f"volume {html.escape(str(regime.get('volume_tag', 'unknown')))}"
+                    + (f" · as of {html.escape(str(regime.get('date', ''))[:10])}" if regime.get('date') else "")
+                    + data_age
+                )
+        altseason = analysis_data.get('cmc_altseason_index') or {}
+        if altseason.get('status') == 'ok':
+            response += f"\nAltcoin season index: {altseason.get('altcoin_index')} ({html.escape(str(altseason.get('bucket', 'neutral')))})"
         else:
-            response += (
-                f"\n{venue.upper()}: {html.escape(str(regime.get('direction', 'unknown')))} · "
-                f"vol {html.escape(str(regime.get('volatility', 'unknown')))} · "
-                f"volume {html.escape(str(regime.get('volume_tag', 'unknown')))}"
-                + (f" · as of {html.escape(str(regime.get('date', ''))[:10])}" if regime.get('date') else "")
-                + data_age
-            )
-    altseason = analysis_data.get('cmc_altseason_index') or {}
-    if altseason.get('status') == 'ok':
-        response += f"\nAltcoin season index: {altseason.get('altcoin_index')} ({html.escape(str(altseason.get('bucket', 'neutral')))})"
-    else:
-        response += "\nAltcoin season index: unknown/stale"
+            response += "\nAltcoin season index: unknown/stale"
     return response
 
 
