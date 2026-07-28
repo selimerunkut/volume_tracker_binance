@@ -46,11 +46,11 @@ The labeler does **not** need to wait for today's final hourly candle. It uses t
 
 The currently missing interval beginning **2026-04-03** is intentionally excluded for now. No candles are imputed and no label is generated for the excluded interval. The regime state resets when complete post-gap data resumes.
 
-The deployed temporary exclusion covers the observed boundary interval `2026-04-02` through `2026-07-05`, because 2026-04-02 has only one row and 2026-07-06 is currently partial. This prevents a one-row boundary artifact from being treated as a valid day.
+The deployed temporary exclusion covers the observed boundary interval `2026-04-02` through `2026-07-05`, because 2026-04-02 has only one row and 2026-07-06 is currently partial. It also includes the already-adjudicated one-day Kraken gap `2025-11-01`, which otherwise prevents the historical series from being processed. This prevents a one-row boundary artifact from being treated as a valid day.
 
 This is temporary. When the Q2 2026 Kraken history file is available:
 
-- merge/replace the source through the missing interval;
+- merge/replace the source through the missing interval and retain/verify the already-adjudicated `2025-11-01` exclusion;
 - rerun row-count and continuity checks;
 - remove the temporary exclusion from `src/services/regime_service.py`;
 - rerun the Kraken oracle/parity tests;

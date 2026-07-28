@@ -21,7 +21,7 @@ SOURCE_ENV = {
 # Temporary source-data exception. Remove after the Q2 2026 Kraken history file
 # fills 2026-04-03 through the first complete post-gap day.
 TEMPORARY_IGNORED_DATES = {
-    "kraken": set(pd.date_range("2026-04-02", "2026-07-05", freq="D", tz="UTC")),
+    "kraken": set(pd.date_range("2026-04-02", "2026-07-05", freq="D", tz="UTC")) | {pd.Timestamp("2025-11-01", tz="UTC")},
     "okx": set(),
 }
 
