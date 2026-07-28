@@ -6,6 +6,8 @@ import logging
 import os
 from datetime import datetime, timezone
 
+import pandas as pd
+
 from .db_service import get_connection, init_db
 from .regime_labeler import current_snapshot, label_file
 
@@ -15,6 +17,12 @@ VENUES = ("okx", "kraken")
 SOURCE_ENV = {
     "okx": "REGIME_SOURCE_FEATHER_OKX",
     "kraken": "REGIME_SOURCE_FEATHER_KRAKEN",
+}
+# Temporary source-data exception. Remove after the Q2 2026 Kraken history file
+# fills 2026-04-03 through the first complete post-gap day.
+TEMPORARY_IGNORED_DATES = {
+    "kraken": set(pd.date_range("2026-04-02", "2026-07-05", freq="D", tz="UTC")),
+    "okx": set(),
 }
 
 
@@ -28,7 +36,14 @@ def _source_path(venue):
 def run_venue(venue, require_freshness=True):
     venue = venue.lower()
     path = _source_path(venue)
-    labels, metadata = label_file(path, venue, require_freshness=require_freshness)
+    labels, metadata = label_file(
+        path,
+        venue,
+        require_freshness=require_freshness,
+        ignored_dates=TEMPORARY_IGNORED_DATES.get(venue, set()),
+    )
+    if TEMPORARY_IGNORED_DATES.get(venue):
+        metadata["validation_result"] = "complete_with_temporary_gap_exclusion"
     computed_at = datetime.now(timezone.utc).isoformat()
     conn = get_connection()
     try:
@@ -68,6 +83,8 @@ def run_venue(venue, require_freshness=True):
     finally:
         conn.close()
     snapshot = current_snapshot(labels)
+    if snapshot.get("status") == "ok":
+        snapshot["source_age_days"] = max(0, (datetime.now(timezone.utc).date() - pd.Timestamp(snapshot["date"]).date()).days)
     logger.info("Regime %s updated through %s: %s", venue, metadata["source_completed_through"], snapshot)
     return snapshot
 
@@ -79,7 +96,7 @@ def run_all(require_freshness=True):
         try:
             results[venue] = run_venue(venue, require_freshness=require_freshness)
         except Exception as exc:
-            logger.exception("Regime %s failed closed: %s", venue, exc)
+            logger.warning("Regime %s failed closed: %s", venue, exc)
             results[venue] = {"status": "unknown/stale", "error": str(exc)}
     if all(results.get(venue, {}).get("status") == "ok" for venue in VENUES):
         if results["okx"].get("direction") != results["kraken"].get("direction"):

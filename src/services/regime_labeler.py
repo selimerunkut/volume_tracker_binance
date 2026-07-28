@@ -47,7 +47,7 @@ def _ols_t(log_prices):
     return float(slope), tstat
 
 
-def load_validated_1h(path, venue, require_freshness=True, now=None):
+def load_validated_1h(path, venue, require_freshness=True, now=None, max_age_days=7):
     """Read and validate one venue's immutable Freqtrade Feather artifact."""
     venue = str(venue).lower()
     if venue not in VENUE_CONTRACTS:
@@ -81,32 +81,37 @@ def load_validated_1h(path, venue, require_freshness=True, now=None):
             now_timestamp = now_timestamp.tz_localize("UTC")
         else:
             now_timestamp = now_timestamp.tz_convert("UTC")
-        previous_day = (now_timestamp - pd.Timedelta(days=1)).normalize()
-        if frame["date"].max().normalize() < previous_day:
-            raise ValueError("source Feather is stale")
+        daily_counts = frame.assign(_day=frame["date"].dt.normalize()).groupby("_day").size()
+        completed_days = daily_counts[daily_counts == 24]
+        latest_completed = completed_days.index.max() if not completed_days.empty else None
+        cutoff = (now_timestamp - pd.Timedelta(days=max_age_days)).normalize()
+        if latest_completed is None or latest_completed < cutoff:
+            raise ValueError(f"source Feather is older than {max_age_days} days")
     return frame
 
 
-def build_daily(frame, allowed_incomplete_dates=()):
+def build_daily(frame, allowed_incomplete_dates=(), ignored_dates=()):
     """Construct completed UTC daily candles and fail closed on any unadjudicated gap."""
     allowed = {pd.Timestamp(value).tz_localize("UTC") if pd.Timestamp(value).tzinfo is None else pd.Timestamp(value).tz_convert("UTC") for value in allowed_incomplete_dates}
     allowed = {value.normalize() for value in allowed}
+    ignored = {pd.Timestamp(value).tz_localize("UTC").normalize() if pd.Timestamp(value).tzinfo is None else pd.Timestamp(value).tz_convert("UTC").normalize() for value in ignored_dates}
     hourly = frame.set_index("date").sort_index()
     counts = hourly.resample("1D", label="left", closed="left").size()
     if len(counts) and counts.iloc[-1] < 24:
         hourly = hourly[hourly.index < counts.index[-1]]
         counts = hourly.resample("1D", label="left", closed="left").size()
-    incomplete = counts[(counts != 24) & ~counts.index.isin(allowed)]
+    incomplete = counts[(counts != 24) & ~counts.index.isin(allowed) & ~counts.index.isin(ignored)]
     if len(incomplete):
         details = ", ".join(f"{idx.date()}={int(count)}" for idx, count in incomplete.head(10).items())
         raise ValueError(f"incomplete daily candles: {details}")
     daily = hourly.resample("1D", label="left", closed="left").agg(
         {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
     ).dropna()
-    if allowed:
-        daily = daily[~daily.index.isin(allowed)]
+    if allowed or ignored:
+        daily = daily[~daily.index.isin(allowed | ignored)]
     expected = pd.date_range(daily.index.min(), daily.index.max(), freq="1D", tz="UTC")
-    missing = expected.difference(daily.index).difference(pd.DatetimeIndex(list(allowed), tz="UTC"))
+    excluded = pd.DatetimeIndex(list(allowed | ignored), tz="UTC")
+    missing = expected.difference(daily.index).difference(excluded)
     if len(missing):
         raise ValueError(f"missing daily candles: {missing[:10].tolist()}")
     if len(daily) < MIN_DAILY_ROWS:
@@ -162,10 +167,10 @@ def compute_labels(daily):
     return x.reset_index(drop=True)
 
 
-def label_file(path, venue, require_freshness=True, now=None, allowed_incomplete_dates=()):
+def label_file(path, venue, require_freshness=True, now=None, allowed_incomplete_dates=(), ignored_dates=()):
     source = Path(path)
     frame = load_validated_1h(source, venue, require_freshness=require_freshness, now=now)
-    daily = build_daily(frame, allowed_incomplete_dates=allowed_incomplete_dates)
+    daily = build_daily(frame, allowed_incomplete_dates=allowed_incomplete_dates, ignored_dates=ignored_dates)
     labels = compute_labels(daily)
     return labels, {
         "venue": venue,

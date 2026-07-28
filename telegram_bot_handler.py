@@ -393,6 +393,7 @@ def format_strategy_message(strategy, symbol, exchange_name, label):
                 f"\n{venue.upper()}: {html.escape(str(regime.get('direction', 'unknown')))} · "
                 f"vol {html.escape(str(regime.get('volatility', 'unknown')))} · "
                 f"volume {html.escape(str(regime.get('volume_tag', 'unknown')))}"
+                + (f" · as of {html.escape(str(regime.get('date', ''))[:10])}" if regime.get('date') else "")
             )
     altseason = analysis_data.get('cmc_altseason_index') or {}
     if altseason.get('status') == 'ok':

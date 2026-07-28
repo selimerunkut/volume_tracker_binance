@@ -108,3 +108,21 @@ def test_gap_policy_can_use_adjudicated_fixture_dates():
     with pytest.raises(ValueError):
         build_daily(frame)
     assert len(build_daily(frame, allowed_incomplete_dates=[day])) == 429
+
+
+def test_week_old_source_is_accepted(tmp_path):
+    frame = make_hourly()
+    path = tmp_path / "weekly.feather"
+    frame.to_feather(path)
+    now = frame["date"].max() + pd.Timedelta(days=7)
+    assert not load_validated_1h(path, "okx", now=now, max_age_days=7).empty
+
+
+def test_explicit_ignored_gap_resets_daily_series():
+    frame = make_hourly()
+    ignored_day = frame.loc[100 * 24, "date"].normalize()
+    frame = frame.drop(frame.index[100 * 24:100 * 24 + 24]).reset_index(drop=True)
+    with pytest.raises(ValueError):
+        build_daily(frame)
+    daily = build_daily(frame, ignored_dates=[ignored_day])
+    assert ignored_day not in daily.index
