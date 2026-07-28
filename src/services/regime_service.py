@@ -105,8 +105,13 @@ def run_all(require_freshness=True):
 
 
 def get_regimes_at(event_ts=None):
-    """Return labels strictly before an event timestamp, never a future label."""
+    """Return labels strictly before an event timestamp, never a future label.
+
+    Explicit historical timestamps use stored provenance. A live lookup also
+    enforces the seven-day source freshness contract.
+    """
     init_db()
+    live_lookup = event_ts is None
     if event_ts is None:
         event_ts = datetime.now(timezone.utc)
     event_iso = event_ts.isoformat() if hasattr(event_ts, "isoformat") else str(event_ts)
@@ -127,6 +132,13 @@ def get_regimes_at(event_ts=None):
                 result[venue] = {"status": "unknown/stale"}
             else:
                 result[venue] = dict(row)
+                if live_lookup:
+                    completed = pd.Timestamp(row["source_completed_through"])
+                    age_days = (pd.Timestamp.now(tz="UTC").normalize() - completed.normalize()).days
+                    if age_days > 7:
+                        result[venue] = {"status": "unknown/stale", "source_age_days": age_days}
+                        continue
+                    result[venue]["source_age_days"] = age_days
                 result[venue]["status"] = "ok"
     finally:
         conn.close()
@@ -134,7 +146,7 @@ def get_regimes_at(event_ts=None):
 
 
 def get_current_regimes():
-    return get_regimes_at(datetime.now(timezone.utc))
+    return get_regimes_at()
 
 
 if __name__ == "__main__":
