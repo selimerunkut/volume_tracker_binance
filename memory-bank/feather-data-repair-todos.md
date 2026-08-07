@@ -1,5 +1,7 @@
 # Feather Data Repair TODOs
 
+> **External handoff only.** This work belongs to the `cex_trader` application, not this signal-bot repository. `CEX_volume_tracker_B` must not repair, rewrite, or merge Feather files. See `memory-bank/regime-market-labeling-plan.md` for the signal-bot plan.
+
 Created: 2026-07-29 UTC
 
 ## Current facts
