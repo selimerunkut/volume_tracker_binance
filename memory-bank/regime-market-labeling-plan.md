@@ -113,8 +113,8 @@ Kraken: unknown/stale · calculation data through 2026-07-29 (9 days behind toda
 
 ### Phase 3 — add Hyperliquid as an optional third venue
 
-- [ ] Ask/inspect `cex_trader` for the canonical Hyperliquid BTC pair, 1h source path, and UTC/data contract.
-- [ ] Confirm a sufficiently long validated Hyperliquid history exists before adding runtime wiring.
+- [x] Inspect `cex_trader`: the canonical spot pair is `BTC/USDC`, and its history service targets `/opt/cex_trader/user_data/research/hyperliquid-spot`.
+- [ ] Confirm a sufficiently long validated Hyperliquid history exists before adding runtime wiring. The current `cex_trader` research manifest has runtime disabled and no validated local Feather artifact is available, so Hyperliquid remains deferred.
 - [ ] Add Hyperliquid to the venue contract registry and independent source configuration.
 - [ ] Add Hyperliquid persistence, gap handling, freshness, and message output.
 - [ ] Create an independent Hyperliquid parity/reference fixture or explicitly document why the frozen algorithm is sufficient.
