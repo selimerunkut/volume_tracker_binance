@@ -8,7 +8,7 @@ from typing import Any
 from .altseason_service import get_latest as get_altseason
 from .db_service import save_suggestion
 from .deterministic_strategy import evaluate_strategy
-from .regime_service import get_regimes_at
+from .regime_service import VENUES, get_regimes_at
 from .market_data_service import fetch_klines, get_current_price
 from .news_service import get_latest_news
 from .technical_analysis import calculate_indicators, get_latest_indicators
@@ -77,8 +77,7 @@ def analyze_and_suggest(symbol: str, exchange_name: str = "binance") -> dict[str
         except Exception as regime_error:
             logger.warning("BTC regime lookup failed: %s", regime_error)
             analysis_data["btc_market_regime"] = {
-                "okx": {"status": "unknown/stale"},
-                "kraken": {"status": "unknown/stale"},
+                venue: {"status": "unknown/stale"} for venue in VENUES
             }
         try:
             analysis_data["cmc_altseason_index"] = get_altseason()

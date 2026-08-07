@@ -5,6 +5,11 @@ import pytest
 from src.services import db_service, regime_service
 
 
+def test_hyperliquid_is_a_configured_optional_regime_venue():
+    assert "hyperliquid" in regime_service.VENUES
+    assert regime_service.SOURCE_ENV["hyperliquid"] == "REGIME_SOURCE_FEATHER_HYPERLIQUID"
+
+
 def test_failed_venue_cannot_serve_old_labels_as_live(monkeypatch, tmp_path):
     monkeypatch.setattr(db_service, "DB_PATH", str(tmp_path / "regime.db"))
     db_service.init_db()

@@ -14,6 +14,7 @@ import pandas as pd
 REQUIRED_COLUMNS = ("date", "open", "high", "low", "close", "volume")
 VENUE_CONTRACTS = {
     "okx": "fixed-stake-structural-regime-contract-v1-okx",
+    "hyperliquid": "fixed-stake-structural-regime-contract-v1-hyperliquid",
     "kraken": "fixed-stake-structural-regime-contract-v1-kraken",
 }
 MIN_DAILY_ROWS = 120  # enough warm-up for rv75 while allowing live feeds with limited history

@@ -178,6 +178,7 @@ Type=simple
 User=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 Environment=REGIME_SOURCE_FEATHER_OKX=/opt/cex_trader/user_data/profiles/okx-spot/data/okx/BTC_USDC-1h.feather
+Environment=REGIME_SOURCE_FEATHER_HYPERLIQUID=/opt/cex_trader/user_data/research/hyperliquid-spot/BTC_USDC-1h.feather
 Environment=REGIME_SOURCE_FEATHER_KRAKEN=/opt/cex_trader/user_data/data/kraken/BTC_USDC-1h.feather
 ExecStart=$INSTALL_DIR/.venv/bin/python $INSTALL_DIR/telegram_bot_handler.py
 Restart=always
@@ -200,6 +201,7 @@ Type=simple
 User=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 Environment=REGIME_SOURCE_FEATHER_OKX=/opt/cex_trader/user_data/profiles/okx-spot/data/okx/BTC_USDC-1h.feather
+Environment=REGIME_SOURCE_FEATHER_HYPERLIQUID=/opt/cex_trader/user_data/research/hyperliquid-spot/BTC_USDC-1h.feather
 Environment=REGIME_SOURCE_FEATHER_KRAKEN=/opt/cex_trader/user_data/data/kraken/BTC_USDC-1h.feather
 ExecStart=$INSTALL_DIR/.venv/bin/python $INSTALL_DIR/b_volume_alerts.py
 Restart=always

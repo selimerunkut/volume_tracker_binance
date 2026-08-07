@@ -13,9 +13,10 @@ from .regime_labeler import current_snapshot, label_file
 
 logger = logging.getLogger(__name__)
 
-VENUES = ("okx", "kraken")
+VENUES = ("okx", "hyperliquid", "kraken")
 SOURCE_ENV = {
     "okx": "REGIME_SOURCE_FEATHER_OKX",
+    "hyperliquid": "REGIME_SOURCE_FEATHER_HYPERLIQUID",
     "kraken": "REGIME_SOURCE_FEATHER_KRAKEN",
 }
 # Temporary source-data exception. Remove after the Q2 2026 Kraken history file
@@ -23,6 +24,7 @@ SOURCE_ENV = {
 TEMPORARY_IGNORED_DATES = {
     "kraken": set(pd.date_range("2026-04-02", "2026-06-02", freq="D", tz="UTC")) | {pd.Timestamp("2025-11-01", tz="UTC")},
     "okx": set(),
+    "hyperliquid": set(),
 }
 
 
@@ -143,9 +145,13 @@ def run_all(require_freshness=True):
         except Exception as exc:
             logger.warning("Regime %s failed closed: %s", venue, exc)
             results[venue] = {"status": "unknown/stale", "error": str(exc)}
-    if all(results.get(venue, {}).get("status") == "ok" for venue in VENUES):
-        if results["okx"].get("direction") != results["kraken"].get("direction"):
-            logger.warning("Cross-venue BTC regime divergence: %s", results)
+    successful_directions = {
+        result.get("direction")
+        for result in results.values()
+        if result.get("status") == "ok" and result.get("direction")
+    }
+    if len(successful_directions) > 1:
+        logger.warning("Cross-venue BTC regime divergence: %s", results)
     return results
 
 

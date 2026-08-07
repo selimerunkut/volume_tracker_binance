@@ -18,6 +18,29 @@ def test_news_links_are_clickable_only_for_http_urls():
     assert rendered.count('<a href=') == 1
 
 
+def test_strategy_message_renders_all_regime_venues():
+    message = tb.format_strategy_message(
+        {
+            'action': 'WAIT',
+            'confidence': 50,
+            'reasoning': 'Neutral',
+            'analysis_data': {
+                'btc_market_regime': {
+                    'okx': {'status': 'ok', 'direction': 'structural_bull', 'volatility': 'high', 'volume_tag': 'expanded', 'date': '2026-08-06', 'source_completed_through': '2026-08-06', 'source_age_days': 1},
+                    'hyperliquid': {'status': 'ok', 'direction': 'range_or_transition', 'volatility': 'normal_or_low', 'volume_tag': 'expanded', 'date': '2026-08-06', 'source_completed_through': '2026-08-06', 'source_age_days': 1},
+                    'kraken': {'status': 'unknown/stale', 'source_completed_through': '2026-07-29', 'source_age_days': 9},
+                },
+            },
+        },
+        'SAFEUSD',
+        'okx',
+        'deterministic',
+    )
+    assert 'OKX: structural_bull' in message
+    assert 'HYPERLIQUID: range_or_transition' in message
+    assert 'KRAKEN: unknown/stale' in message
+
+
 def test_analysis_details_message_is_structured_and_escaped():
     message = tb.format_analysis_details_message(
         {

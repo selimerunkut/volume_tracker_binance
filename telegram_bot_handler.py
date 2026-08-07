@@ -4,7 +4,7 @@ import asyncio
 import html
 import logging
 import inspect
-from datetime import datetime, time, timezone
+from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.error import BadRequest, TelegramError
@@ -18,7 +18,7 @@ from src.services.strategy_advisor import analyze_and_suggest
 from src.services.llm_strategy import analyze_and_suggest as legacy_analyze_and_suggest
 from src.services.llm_strategy import analyze_and_suggest as deepseek_analyze_and_suggest
 from src.services.performance_tracker import track_performance
-from src.services.regime_service import run_all as run_regime_labeler
+from src.services.regime_service import VENUES, run_all as run_regime_labeler
 from src.services.db_service import get_performance_stats, init_db, get_suggestion_details, get_setting, set_setting
 from src.services.db_service import get_suggestions_between_dates, get_last_analyzed_symbols
 from src.services.alert_preferences import (
@@ -402,7 +402,7 @@ def format_strategy_message(strategy, symbol, exchange_name, label):
     if 'btc_market_regime' in analysis_data or 'cmc_altseason_index' in analysis_data:
         regimes = analysis_data.get('btc_market_regime') or {}
         response += "\n\n<b>BTC market regime</b>:"
-        for venue in ('okx', 'kraken'):
+        for venue in VENUES:
             regime = regimes.get(venue) or {"status": "unknown/stale"}
             data_age = _format_regime_data_age(regime)
             if regime.get('status') != 'ok':
@@ -1579,7 +1579,10 @@ def main() -> None:
     daily_interval = 180 if test_mode else 86400
     job_queue.run_repeating(run_hourly_signals, interval=hourly_interval, first=20)
     job_queue.run_repeating(run_daily_signals, interval=daily_interval, first=30)
-    job_queue.run_daily(run_regime_job, time=time(hour=0, minute=5, tzinfo=timezone.utc))
+    # Refresh venue labels frequently so a source repaired by cex_trader is
+    # visible without waiting for the old once-daily job.
+    regime_interval = 900 if not test_mode else 60
+    job_queue.run_repeating(run_regime_job, interval=regime_interval, first=5)
 
     # Run the bot until the user presses Ctrl-C
     print(f"[{datetime.now()}] Telegram bot started with Deterministic Strategy Advisor. Listening for updates...")

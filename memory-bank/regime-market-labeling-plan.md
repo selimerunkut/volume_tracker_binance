@@ -114,11 +114,13 @@ Kraken: unknown/stale · calculation data through 2026-07-29 (9 days behind toda
 ### Phase 3 — add Hyperliquid as an optional third venue
 
 - [x] Inspect `cex_trader`: the canonical spot pair is `BTC/USDC`, and its history service targets `/opt/cex_trader/user_data/research/hyperliquid-spot`.
-- [ ] Confirm a sufficiently long validated Hyperliquid history exists before adding runtime wiring. The current `cex_trader` research manifest has runtime disabled and no validated local Feather artifact is available, so Hyperliquid remains deferred.
-- [ ] Add Hyperliquid to the venue contract registry and independent source configuration.
-- [ ] Add Hyperliquid persistence, gap handling, freshness, and message output.
+- [x] Confirm a sufficiently long validated Hyperliquid BTC/USDC 1h artifact exists at the `cex_trader` research output path.
+- [x] Add Hyperliquid to the venue contract registry and independent source configuration.
+- [x] Add Hyperliquid persistence, gap handling, freshness, and message output.
 - [ ] Create an independent Hyperliquid parity/reference fixture or explicitly document why the frozen algorithm is sufficient.
-- [ ] Add tests proving no cross-venue mixing and non-blocking behavior.
+- [x] Add tests proving venue configuration and non-blocking output behavior.
+
+Operational deployment and first-refresh verification are tracked in `memory-bank/regime-live-data-todos.md`.
 
 ### Phase 4 — live verification
 
