@@ -31,9 +31,9 @@ This bot must consume those files only. It must not repair them.
 
 ## Remaining operational TODOs
 
-- [ ] Deploy the exact signal-bot commit to bagent.
-- [ ] Confirm the running systemd unit has all three `REGIME_SOURCE_FEATHER_*` variables.
-- [ ] Confirm the first refresh logs successful Hyperliquid calculation through its latest complete UTC day.
+- [x] Deploy the exact signal-bot commit to bagent.
+- [x] Confirm the running systemd unit has all three `REGIME_SOURCE_FEATHER_*` variables.
+- [x] Confirm the first refresh logs successful Hyperliquid calculation through `2026-08-06`.
 - [ ] Confirm Kraken becomes `ok` automatically after `cex_trader` updates the canonical Kraken file through a complete recent day.
 - [ ] If Kraken remains stale, report the exact validation error and source completion date; do not substitute a staging or repaired file from this repository.
 - [ ] Keep a live-data monitoring check for source age and protected-window gaps.
