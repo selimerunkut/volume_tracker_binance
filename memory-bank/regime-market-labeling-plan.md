@@ -69,7 +69,7 @@ Change the signal-bot policy as follows:
 7. Keep a bounded/adjudicated gap policy so a truncated source cannot silently look valid. A source with too little total history still returns `unknown/stale`.
 8. Store the gap reason and source provenance in the venue result/log.
 
-The exact maximum for an automatically tolerated short gap must be agreed before implementation. Recommended default: tolerate a bounded short gap (for example, up to seven UTC days) and require explicit configuration for longer gaps such as the current Kraken Q2 interval.
+Implementation decision: tolerate a maximum gap of seven UTC calendar days only when the complete gap is outside the protected recent window. The protected window is the current UTC day and the preceding seven UTC days. Any missing or incomplete interval in that window fails closed, even when it is listed as an explicit historical exception. Longer historical gaps require explicit configuration, such as the current Kraken Q2 interval.
 
 ## Freshness and visibility
 
@@ -96,11 +96,11 @@ Kraken: unknown/stale · calculation data through 2026-07-29 (9 days behind toda
 
 ### Phase 1 — make venue failures non-blocking
 
-- [ ] Add per-venue result handling so one failed/stale source does not cause `run_all()` to fail the other venues.
-- [ ] Change gap validation from global fail-closed to venue-local gap boundaries with reset semantics.
-- [ ] Preserve strict validation for malformed rows, duplicate timestamps, wrong timezone, and insufficient total history.
-- [ ] Add tests for a short missing interval, a long configured gap, post-gap state reset, and an insufficient/truncated source.
-- [ ] Keep the current Kraken Q2 exclusion explicit and provenance-tagged.
+- [x] Add per-venue result handling so one failed/stale source does not cause `run_all()` to fail the other venues.
+- [x] Change gap validation from global fail-closed to venue-local gap boundaries with reset semantics.
+- [x] Preserve strict validation for malformed rows, duplicate timestamps, wrong timezone, and insufficient total history.
+- [x] Add tests for historical short gaps, current-window gaps, long gaps, and failed persisted venue state.
+- [x] Keep the current Kraken Q2 exclusion explicit and provenance-tagged.
 
 ### Phase 2 — verify current OKX/Kraken behavior
 
@@ -132,10 +132,20 @@ Kraken: unknown/stale · calculation data through 2026-07-29 (9 days behind toda
 
 ## Decisions needed before implementation
 
-1. Should the optional short-gap bound be seven UTC days, or another value?
-2. For an event inside a gap, should lookup return the last pre-gap label or `unknown/stale`? The safer choice for signal evidence is `unknown/stale`; either behavior must be explicit and tested.
+1. **Resolved:** the optional short-gap bound is seven UTC days, excluding the protected current/recent window.
+2. **Resolved:** an event inside a gap must return `unknown/stale`, not the last pre-gap label.
 3. What exact Hyperliquid BTC pair and source artifact does `cex_trader` provide?
 4. Should Hyperliquid appear before or after Kraken in Telegram output?
+
+## Implementation status
+
+Implemented in the signal bot:
+
+- Historical gaps up to seven UTC days are tolerated.
+- The current UTC day and preceding seven UTC days are protected; missing or incomplete data there fails closed.
+- Failed venue validation is persisted separately, so old labels cannot appear as live `ok`.
+- Historical labels remain queryable by explicit event timestamp.
+- No source Feather file is modified.
 
 ## Completion criteria
 

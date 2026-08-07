@@ -90,30 +90,66 @@ def load_validated_1h(path, venue, require_freshness=True, now=None, max_age_day
     return frame
 
 
-def build_daily(frame, allowed_incomplete_dates=(), ignored_dates=()):
-    """Construct completed UTC daily candles and fail closed on any unadjudicated gap."""
-    allowed = {pd.Timestamp(value).tz_localize("UTC") if pd.Timestamp(value).tzinfo is None else pd.Timestamp(value).tz_convert("UTC") for value in allowed_incomplete_dates}
-    allowed = {value.normalize() for value in allowed}
-    ignored = {pd.Timestamp(value).tz_localize("UTC").normalize() if pd.Timestamp(value).tzinfo is None else pd.Timestamp(value).tz_convert("UTC").normalize() for value in ignored_dates}
+def build_daily(frame, allowed_incomplete_dates=(), ignored_dates=(), now=None,
+                max_tolerated_gap_days=7):
+    """Build daily candles, tolerating only short, wholly historical gaps.
+
+    A gap touching the inclusive protection window (UTC today minus seven days
+    through today) is never silently tolerated.  Longer historical gaps must
+    be explicitly adjudicated.  No rows are created for tolerated gaps.
+    """
+    def normalize(values):
+        result = set()
+        for value in values:
+            timestamp = pd.Timestamp(value)
+            timestamp = timestamp.tz_localize("UTC") if timestamp.tzinfo is None else timestamp.tz_convert("UTC")
+            result.add(timestamp.normalize())
+        return result
+
+    allowed = normalize(allowed_incomplete_dates)
+    ignored = normalize(ignored_dates)
+    now_timestamp = pd.Timestamp(now or _utc_now())
+    now_timestamp = now_timestamp.tz_localize("UTC") if now_timestamp.tzinfo is None else now_timestamp.tz_convert("UTC")
+    protection_start = now_timestamp.normalize() - pd.Timedelta(days=7)
     hourly = frame.set_index("date").sort_index()
     counts = hourly.resample("1D", label="left", closed="left").size()
+    # Never label a forming or partial trailing day.  A partial day in the
+    # protected recent window is a live-data defect, not a tolerable gap.
     if len(counts) and counts.iloc[-1] < 24:
+        trailing_day = counts.index[-1].normalize()
+        if trailing_day >= protection_start and trailing_day <= now_timestamp.normalize():
+            raise ValueError(f"current protection-window gap: {trailing_day.date()} ({int(counts.iloc[-1])} candles)")
         hourly = hourly[hourly.index < counts.index[-1]]
         counts = hourly.resample("1D", label="left", closed="left").size()
-    incomplete = counts[(counts != 24) & ~counts.index.isin(allowed) & ~counts.index.isin(ignored)]
-    if len(incomplete):
-        details = ", ".join(f"{idx.date()}={int(count)}" for idx, count in incomplete.head(10).items())
-        raise ValueError(f"incomplete daily candles: {details}")
+    incomplete = set(counts.index[counts != 24])
     daily = hourly.resample("1D", label="left", closed="left").agg(
         {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
     ).dropna()
-    if allowed or ignored:
-        daily = daily[~daily.index.isin(allowed | ignored)]
+    daily = daily[~daily.index.isin(allowed | ignored)]
+    if daily.empty:
+        raise ValueError("at least completed daily candles are required")
     expected = pd.date_range(daily.index.min(), daily.index.max(), freq="1D", tz="UTC")
-    excluded = pd.DatetimeIndex(list(allowed | ignored), tz="UTC")
-    missing = expected.difference(daily.index).difference(excluded)
-    if len(missing):
-        raise ValueError(f"missing daily candles: {missing[:10].tolist()}")
+    missing = set(expected.difference(daily.index))
+    gaps = sorted(incomplete | missing)
+    tolerated_gaps = set()
+    if gaps:
+        gap_runs = []
+        run = [gaps[0]]
+        for day in gaps[1:]:
+            if (day - run[-1]).days == 1:
+                run.append(day)
+            else:
+                gap_runs.append(run)
+                run = [day]
+        gap_runs.append(run)
+        for run in gap_runs:
+            if any(protection_start <= day <= now_timestamp.normalize() for day in run):
+                raise ValueError(f"current protection-window gap: {run[0].date()}..{run[-1].date()}")
+            if len(run) > max_tolerated_gap_days and not set(run).issubset(allowed | ignored):
+                raise ValueError(f"missing daily candles: {run[:10]}")
+            tolerated_gaps.update(run)
+    if tolerated_gaps:
+        daily = daily[~daily.index.isin(tolerated_gaps)]
     if len(daily) < MIN_DAILY_ROWS:
         raise ValueError(f"at least {MIN_DAILY_ROWS} completed daily candles are required")
     return daily
@@ -170,7 +206,12 @@ def compute_labels(daily):
 def label_file(path, venue, require_freshness=True, now=None, allowed_incomplete_dates=(), ignored_dates=()):
     source = Path(path)
     frame = load_validated_1h(source, venue, require_freshness=require_freshness, now=now)
-    daily = build_daily(frame, allowed_incomplete_dates=allowed_incomplete_dates, ignored_dates=ignored_dates)
+    daily = build_daily(
+        frame,
+        allowed_incomplete_dates=allowed_incomplete_dates,
+        ignored_dates=ignored_dates,
+        now=now,
+    )
     labels = compute_labels(daily)
     return labels, {
         "venue": venue,

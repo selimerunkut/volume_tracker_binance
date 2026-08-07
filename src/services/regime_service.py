@@ -33,18 +33,51 @@ def _source_path(venue):
     return value
 
 
-def run_venue(venue, require_freshness=True):
+def _write_validation_status(venue, status, validation_result, *, completed_through=None,
+                             source_sha256=None, error=None, validated_at=None):
+    conn = get_connection()
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO regime_validation_status
+                (venue, status, validation_result, validated_at,
+                 source_completed_through, source_sha256, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(venue) DO UPDATE SET
+                  status=excluded.status,
+                  validation_result=excluded.validation_result,
+                  validated_at=excluded.validated_at,
+                  source_completed_through=excluded.source_completed_through,
+                  source_sha256=excluded.source_sha256,
+                  error=excluded.error
+                """ ,
+                (venue, status, validation_result,
+                 validated_at or datetime.now(timezone.utc).isoformat(),
+                 completed_through, source_sha256, error),
+            )
+    finally:
+        conn.close()
+
+
+def run_venue(venue, require_freshness=True, now=None):
     venue = venue.lower()
-    path = _source_path(venue)
-    # Always calculate labels from the available historical artifact. The
-    # freshness flag controls whether the returned snapshot is live-usable;
-    # it must not discard otherwise valid historical calculations.
-    labels, metadata = label_file(
-        path,
-        venue,
-        require_freshness=False,
-        ignored_dates=TEMPORARY_IGNORED_DATES.get(venue, set()),
-    )
+    init_db()
+    now = now or datetime.now(timezone.utc)
+    try:
+        path = _source_path(venue)
+        # Historical calculation may bypass artifact-age rejection, but it
+        # never bypasses current-week gap validation in build_daily.
+        labels, metadata = label_file(
+            path,
+            venue,
+            require_freshness=False,
+            now=now,
+            ignored_dates=TEMPORARY_IGNORED_DATES.get(venue, set()),
+        )
+    except Exception as exc:
+        _write_validation_status(venue, "unknown/stale", "failed", error=str(exc))
+        raise
     if TEMPORARY_IGNORED_DATES.get(venue):
         metadata["validation_result"] = "complete_with_temporary_gap_exclusion"
     computed_at = datetime.now(timezone.utc).isoformat()
@@ -86,10 +119,17 @@ def run_venue(venue, require_freshness=True):
     finally:
         conn.close()
     snapshot = current_snapshot(labels)
-    source_age_days = max(0, (datetime.now(timezone.utc).date() - pd.Timestamp(metadata["source_completed_through"]).date()).days)
+    source_age_days = max(0, (now.date() - pd.Timestamp(metadata["source_completed_through"]).date()).days)
     snapshot["source_age_days"] = source_age_days
-    if require_freshness and source_age_days > 7:
-        snapshot = {"status": "unknown/stale", "source_age_days": source_age_days}
+    live_status = "ok" if source_age_days <= 7 else "unknown/stale"
+    _write_validation_status(
+        venue, live_status, metadata["validation_result"],
+        completed_through=metadata["source_completed_through"],
+        source_sha256=metadata["source_sha256"],
+    )
+    if require_freshness and live_status != "ok":
+        snapshot = {"status": "unknown/stale", "source_age_days": source_age_days,
+                    "source_completed_through": metadata["source_completed_through"]}
     logger.info("Regime %s calculated through %s: %s", venue, metadata["source_completed_through"], snapshot)
     return snapshot
 
@@ -124,6 +164,9 @@ def get_regimes_at(event_ts=None):
     conn = get_connection()
     try:
         for venue in VENUES:
+            validation = conn.execute(
+                "SELECT * FROM regime_validation_status WHERE venue = ?", (venue,)
+            ).fetchone() if live_lookup else None
             row = conn.execute(
                 """
                 SELECT * FROM regime_labels
@@ -135,6 +178,10 @@ def get_regimes_at(event_ts=None):
             ).fetchone()
             if row is None:
                 result[venue] = {"status": "unknown/stale"}
+            elif live_lookup and (validation is None or validation["status"] != "ok"):
+                result[venue] = {"status": "unknown/stale"}
+                if validation and validation["error"]:
+                    result[venue]["error"] = validation["error"]
             else:
                 result[venue] = dict(row)
                 if live_lookup:

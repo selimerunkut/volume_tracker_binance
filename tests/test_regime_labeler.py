@@ -56,13 +56,36 @@ def test_strict_before_event():
     assert labels[labels.timestamp < event_inside]["timestamp"].max() == labels.iloc[-1]["timestamp"]
 
 
-def test_three_day_persistence_and_gap_reset():
+def test_short_historical_gap_is_tolerated_and_resets_state():
     frame = make_hourly()
     labels = compute_labels(build_daily(frame))
     assert set(labels["direction"]).issubset({"structural_bull", "range_or_transition", "structural_bear"})
     gap_start = frame["date"].dt.normalize().iloc[100 * 24]
     with_gap = frame[frame["date"].dt.normalize() != gap_start].reset_index(drop=True)
-    with pytest.raises(ValueError, match="incomplete daily"):
+    daily = build_daily(with_gap)
+    assert gap_start not in daily.index
+    assert len(daily) == 429
+
+
+def test_recent_gap_is_rejected_even_when_short():
+    frame = make_hourly()
+    now = pd.Timestamp("2026-08-10 12:00", tz="UTC")
+    shift = now.normalize() - pd.Timedelta(days=1) - frame["date"].dt.normalize().max()
+    frame["date"] = frame["date"] + shift
+    gap_start = now.normalize() - pd.Timedelta(days=3)
+    with_gap = frame[frame["date"].dt.normalize() != gap_start].reset_index(drop=True)
+    with pytest.raises(ValueError, match="current protection-window gap"):
+        build_daily(with_gap, now=now)
+    with pytest.raises(ValueError, match="current protection-window gap"):
+        build_daily(with_gap, now=now, allowed_incomplete_dates=[gap_start])
+
+
+def test_gaps_longer_than_seven_days_are_rejected():
+    frame = make_hourly()
+    gap_start = frame["date"].dt.normalize().iloc[100 * 24]
+    gap_dates = pd.date_range(gap_start, periods=8, freq="D", tz="UTC")
+    with_gap = frame[~frame["date"].dt.normalize().isin(gap_dates)].reset_index(drop=True)
+    with pytest.raises(ValueError, match="missing daily candles"):
         build_daily(with_gap)
 
 
@@ -101,12 +124,11 @@ def test_timezone_and_finite_validation(tmp_path):
         load_validated_1h(path, "okx", require_freshness=False)
 
 
-def test_gap_policy_can_use_adjudicated_fixture_dates():
+def test_short_historical_incomplete_day_is_tolerated():
     frame = make_hourly()
     day = frame.loc[100 * 24, "date"].normalize()
     frame = frame.drop(frame.index[100 * 24:100 * 24 + 2]).reset_index(drop=True)
-    with pytest.raises(ValueError):
-        build_daily(frame)
+    assert len(build_daily(frame)) == 429
     assert len(build_daily(frame, allowed_incomplete_dates=[day])) == 429
 
 
@@ -118,11 +140,11 @@ def test_week_old_source_is_accepted(tmp_path):
     assert not load_validated_1h(path, "okx", now=now, max_age_days=7).empty
 
 
-def test_explicit_ignored_gap_resets_daily_series():
+def test_historical_gap_resets_daily_series():
     frame = make_hourly()
     ignored_day = frame.loc[100 * 24, "date"].normalize()
     frame = frame.drop(frame.index[100 * 24:100 * 24 + 24]).reset_index(drop=True)
-    with pytest.raises(ValueError):
-        build_daily(frame)
-    daily = build_daily(frame, ignored_dates=[ignored_day])
+    daily = build_daily(frame)
     assert ignored_day not in daily.index
+    assert len(daily) == 429
+    assert ignored_day not in build_daily(frame, ignored_dates=[ignored_day]).index

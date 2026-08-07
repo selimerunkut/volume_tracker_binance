@@ -88,6 +88,19 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_regime_labels_lookup
         ON regime_labels (venue, instrument, timeframe, date)
     ''')
+    # Durable, venue-local validation state prevents old labels from becoming
+    # live again after a source develops a current-week gap.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS regime_validation_status (
+            venue TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            validation_result TEXT NOT NULL,
+            validated_at TEXT NOT NULL,
+            source_completed_through TEXT,
+            source_sha256 TEXT,
+            error TEXT
+        )
+    ''')
     cursor.execute('''
         CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_auto_symbol_exchange
         ON suggestions (symbol, exchange_name)
