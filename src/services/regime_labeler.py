@@ -118,7 +118,7 @@ def build_daily(frame, allowed_incomplete_dates=(), ignored_dates=(), now=None,
     # protected recent window is a live-data defect, not a tolerable gap.
     if len(counts) and counts.iloc[-1] < 24:
         trailing_day = counts.index[-1].normalize()
-        if trailing_day >= protection_start and trailing_day <= now_timestamp.normalize():
+        if trailing_day < now_timestamp.normalize() and trailing_day >= protection_start:
             raise ValueError(f"current protection-window gap: {trailing_day.date()} ({int(counts.iloc[-1])} candles)")
         hourly = hourly[hourly.index < counts.index[-1]]
         counts = hourly.resample("1D", label="left", closed="left").size()

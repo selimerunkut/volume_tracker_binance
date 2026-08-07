@@ -110,6 +110,16 @@ def test_partial_day_is_not_labeled():
     assert daily.index.max().date() == (frame["date"].max() - pd.Timedelta(days=1)).date()
 
 
+def test_current_day_partial_data_is_dropped():
+    now = pd.Timestamp("2026-08-10 12:00", tz="UTC")
+    frame = make_hourly()
+    shift = now.normalize() - frame["date"].dt.normalize().max()
+    frame["date"] = frame["date"] + shift
+    frame = frame[frame["date"] < now]
+    daily = build_daily(frame, now=now)
+    assert daily.index.max() == now.normalize() - pd.Timedelta(days=1)
+
+
 def test_deterministic_output():
     frame = make_hourly()
     assert compute_labels(build_daily(frame)).equals(compute_labels(build_daily(frame)))
