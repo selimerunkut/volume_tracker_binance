@@ -186,8 +186,15 @@ def get_regimes_at(event_ts=None):
                 result[venue] = {"status": "unknown/stale"}
             elif live_lookup and (validation is None or validation["status"] != "ok"):
                 result[venue] = {"status": "unknown/stale"}
-                if validation and validation["error"]:
-                    result[venue]["error"] = validation["error"]
+                if validation:
+                    if validation["source_completed_through"]:
+                        completed = pd.Timestamp(validation["source_completed_through"])
+                        result[venue]["source_completed_through"] = validation["source_completed_through"]
+                        result[venue]["source_age_days"] = max(
+                            0, (pd.Timestamp.now(tz="UTC").normalize() - completed.normalize()).days
+                        )
+                    if validation["error"]:
+                        result[venue]["error"] = validation["error"]
             else:
                 result[venue] = dict(row)
                 if live_lookup:
