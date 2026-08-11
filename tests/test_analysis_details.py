@@ -28,7 +28,7 @@ def test_strategy_message_renders_all_regime_venues():
                 'btc_market_regime': {
                     'okx': {'status': 'ok', 'direction': 'structural_bull', 'volatility': 'high', 'volume_tag': 'expanded', 'date': '2026-08-06', 'source_completed_through': '2026-08-06', 'source_age_days': 1},
                     'hyperliquid': {'status': 'ok', 'direction': 'range_or_transition', 'volatility': 'normal_or_low', 'volume_tag': 'expanded', 'date': '2026-08-06', 'source_completed_through': '2026-08-06', 'source_age_days': 1},
-                    'kraken': {'status': 'unknown/stale', 'source_completed_through': '2026-07-29', 'source_age_days': 9},
+                    'kraken': {'status': 'unknown/stale', 'error': 'current protection-window gap', 'source_completed_through': '2026-07-29', 'source_age_days': 9},
                 },
             },
         },
@@ -38,7 +38,10 @@ def test_strategy_message_renders_all_regime_venues():
     )
     assert 'OKX: structural_bull' in message
     assert 'HYPERLIQUID: range_or_transition' in message
-    assert 'KRAKEN: unknown/stale' in message
+    assert 'KRAKEN: unknown/stale — current protection-window gap' in message
+    assert 'Regime legend' in message
+    assert 'range/transition = no confirmed three-day structural bull/bear trend' in message
+    assert '<a href="https://coinmarketcap.com/charts/altcoin-season-index/">Altcoin season index</a>' in message
 
 
 def test_analysis_details_message_is_structured_and_escaped():

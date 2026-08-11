@@ -35,6 +35,7 @@ from src.services.volume_alerts import (
     VOLUME_MIN_SETTING_KEY,
     parse_volume_min_quote_usd,
 )
+from src.services.coingecko_trending import fetch_trending, process_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -406,7 +407,11 @@ def format_strategy_message(strategy, symbol, exchange_name, label):
             regime = regimes.get(venue) or {"status": "unknown/stale"}
             data_age = _format_regime_data_age(regime)
             if regime.get('status') != 'ok':
-                response += f"\n{venue.upper()}: unknown/stale{data_age}"
+                reason = regime.get('error') or 'live validation unavailable'
+                response += (
+                    f"\n{venue.upper()}: unknown/stale — "
+                    f"{html.escape(str(reason))}{data_age}"
+                )
             else:
                 response += (
                     f"\n{venue.upper()}: {html.escape(str(regime.get('direction', 'unknown')))} · "
@@ -415,11 +420,22 @@ def format_strategy_message(strategy, symbol, exchange_name, label):
                     + (f" · as of {html.escape(str(regime.get('date', ''))[:10])}" if regime.get('date') else "")
                     + data_age
                 )
+        response += (
+            "\n\n<b>Regime legend</b>: "
+            "range/transition = no confirmed three-day structural bull/bear trend; "
+            "vol normal/low = realized volatility is below its high-volatility threshold; "
+            "volume normal/low = latest completed daily volume is below 1.5× its 90-day median."
+        )
         altseason = analysis_data.get('cmc_altseason_index') or {}
+        altseason_link = '<a href="https://coinmarketcap.com/charts/altcoin-season-index/">Altcoin season index</a>'
         if altseason.get('status') == 'ok':
-            response += f"\nAltcoin season index: {altseason.get('altcoin_index')} ({html.escape(str(altseason.get('bucket', 'neutral')))})"
+            response += (
+                f"\n{altseason_link}: {altseason.get('altcoin_index')} "
+                f"({html.escape(str(altseason.get('bucket', 'neutral')))})"
+                " — 0–24 BTC season, 25–74 neutral, 75–100 altcoin season."
+            )
         else:
-            response += "\nAltcoin season index: unknown/stale"
+            response += f"\n{altseason_link}: unknown/stale"
     return response
 
 
@@ -1523,6 +1539,56 @@ async def run_regime_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     print(f"[{datetime.now()}] Running daily BTC regime labeler...")
     await asyncio.to_thread(run_regime_labeler)
 
+
+def _format_trending_coin(coin: dict) -> str:
+    coin_id = html.escape(str(coin.get('id', '')), quote=True)
+    name = html.escape(str(coin.get('name', coin_id)))
+    symbol = html.escape(str(coin.get('symbol') or '').upper())
+    rank = coin.get('market_cap_rank')
+    rank_text = f"#{rank}" if rank else "unranked"
+    change = coin.get('price_change_percentage_24h')
+    try:
+        change_text = f"{float(change):+.2f}%"
+    except (TypeError, ValueError):
+        change_text = "n/a"
+    market_cap = html.escape(str(coin.get('market_cap') or 'n/a'))
+    volume = html.escape(str(coin.get('total_volume') or 'n/a'))
+    return (
+        f"• <a href=\"https://www.coingecko.com/en/coins/{coin_id}\">"
+        f"{name} ({symbol})</a> — {rank_text}, 24h {change_text}; "
+        f"MCap {market_cap}; Vol {volume}"
+    )
+
+
+def _build_trending_message(title: str, coins: list[dict]) -> str:
+    return title + "\n\n" + "\n".join(_format_trending_coin(coin) for coin in coins)
+
+
+async def run_coingecko_trending(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Poll CoinGecko every 10 minutes and notify on newly observed coins."""
+    if get_setting("coingecko_trending_enabled", "True") == "False":
+        return
+    try:
+        coins = await asyncio.to_thread(fetch_trending)
+        new_coins, digest_due = await asyncio.to_thread(process_snapshot, coins)
+        if new_coins:
+            await context.bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID,
+                text=_build_trending_message("🚨 <b>New CoinGecko trending token(s)</b>", new_coins[:8]),
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+        if digest_due and coins:
+            await context.bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID,
+                text=_build_trending_message("📈 <b>CoinGecko trending tokens (24h)</b>", coins[:10]),
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+    except Exception as exc:
+        logger.warning("CoinGecko trending alert failed: %s", exc)
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors and Telegram API conflicts."""
     logger.error(f"Bot error: {context.error}", exc_info=context.error)
@@ -1583,6 +1649,8 @@ def main() -> None:
     # visible without waiting for the old once-daily job.
     regime_interval = 900 if not test_mode else 60
     job_queue.run_repeating(run_regime_job, interval=regime_interval, first=5)
+    trending_interval = 60 if test_mode else 600
+    job_queue.run_repeating(run_coingecko_trending, interval=trending_interval, first=60)
 
     # Run the bot until the user presses Ctrl-C
     print(f"[{datetime.now()}] Telegram bot started with Deterministic Strategy Advisor. Listening for updates...")

@@ -63,7 +63,9 @@ This project tracks cryptocurrency volume on Binance and Kraken and sends alerts
       "telegram_bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
       "telegram_chat_id": "YOUR_TELEGRAM_CHAT_ID",
       "telegram_bot_token_test": "YOUR_TEST_BOT_TOKEN",
-      "telegram_chat_id_test": "YOUR_TEST_CHAT_ID"
+      "telegram_chat_id_test": "YOUR_TEST_CHAT_ID",
+      "coingecko_api_key": "YOUR_COINGECKO_API_KEY",
+      "coingecko_api_plan": "demo"
     }
     ```
     Optional legacy LLM comparison credentials can also be added:
@@ -89,6 +91,7 @@ This project tracks cryptocurrency volume on Binance and Kraken and sends alerts
         - AI strategy analysis (`/analyze` command)
         - Performance tracking (`/history` command)
         - Background job that evaluates suggestion outcomes every 30 minutes
+        - CoinGecko trending-token alerts polled every 10 minutes, with an hourly summary
 
     b.  **Run the Volume Alert Script** (optional, separate process):
         ```bash
