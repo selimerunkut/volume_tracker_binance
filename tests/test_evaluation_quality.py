@@ -73,9 +73,9 @@ def test_off_hour_signal_uses_nearest_closed_hour_and_reports_offset():
         for hour in range(1, 25)
     ] + [{
         "timestamp": datetime(2026, 1, 2, 1, tzinfo=timezone.utc),
-        "high": 101.0,
-        "low": 99.0,
-        "close": 97.0,
+        "high": 111.0,
+        "low": 109.0,
+        "close": 110.0,
     }])
     result = evaluate_candle_path_detailed(
         item,
@@ -84,7 +84,7 @@ def test_off_hour_signal_uses_nearest_closed_hour_and_reports_offset():
     )
     assert result["status"] == "WIN"
     assert result["raw_return_percent"] == -3.0
-    assert result["boundary_offset_minutes"] == 43.0
+    assert result["boundary_offset_minutes"] == 17.0
     assert result["coverage_status"] == "PARTIAL_COVERAGE"
 
 

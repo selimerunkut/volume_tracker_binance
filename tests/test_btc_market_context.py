@@ -30,6 +30,19 @@ def test_context_is_explanatory_and_uses_closed_candles(monkeypatch):
     assert result["age_minutes"] >= 0
 
 
+def test_invalid_non_finite_context_is_not_reported_as_current(monkeypatch):
+    frame = pd.DataFrame([
+        {"end_ms": index, "o": 100.0, "c": float("inf"), "h": 101.0, "l": 99.0, "v": 10.0}
+        for index in range(72)
+    ])
+    monkeypatch.setattr(btc_market_context, "_fetch_candles", lambda: frame)
+
+    result = btc_market_context.get_btc_market_context()
+
+    assert result["status"] == "unknown/stale"
+    assert "invalid c values" in result["error"]
+
+
 def test_stale_context_is_not_reported_as_current(monkeypatch):
     old_ms = int((datetime.now(timezone.utc).timestamp() - 6 * 60 * 60) * 1000)
     frame = pd.DataFrame([

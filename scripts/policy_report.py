@@ -60,6 +60,8 @@ def _report_table(rows):
     ]
     policy_values = [row.get("pnl_percent") for row in matched]
     market_values = [row.get("raw_return_percent") for row in matched]
+    directional = [row for row in matched if str(row.get("strategy_type", "")).upper() in {"LONG", "SHORT"}]
+    waits = [row for row in terminal if str(row.get("strategy_type", "")).upper() == "WAIT"]
     return {
         "rows": len(rows),
         "actions": {
@@ -74,6 +76,11 @@ def _report_table(rows):
         "current_policy": {
             **_summary(policy_values),
             "note": "Matched-cohort recorded outcome; WAIT is not a traded return.",
+        },
+        "directional_policy": _summary([row.get("pnl_percent") for row in directional]),
+        "wait_utility": {
+            **_summary([row.get("pnl_percent") for row in waits]),
+            "note": "WAIT utility is an avoided-movement label, not an investable return.",
         },
         "always_cash": _summary([0.0 for _ in matched]),
         "always_buy": {

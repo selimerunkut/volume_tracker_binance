@@ -41,6 +41,7 @@ def _fetch_candles(hours=72):
     frame["end_ms"] = pd.to_numeric(frame["T"], errors="coerce")
     for column in ("o", "c", "h", "l", "v"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    frame = frame.replace([math.inf, -math.inf], pd.NA)
     frame = frame.dropna(subset=["start_ms", "end_ms", "o", "c", "h", "l", "v"])
     frame = frame[(frame["end_ms"] <= now_ms) & (frame["o"] > 0) & (frame["c"] > 0) & (frame["h"] > 0) & (frame["l"] > 0)]
     frame = frame.sort_values("end_ms").drop_duplicates("end_ms")
@@ -56,6 +57,10 @@ def get_btc_market_context():
     """Return a short, explanatory context from independently fetched BTC data."""
     try:
         frame = _fetch_candles()
+        for column in ("o", "c", "h", "l", "v"):
+            values = frame[column].astype(float)
+            if not values.map(math.isfinite).all() or (values <= 0).any():
+                raise ValueError(f"Hyperliquid returned invalid {column} values")
         closes = frame["c"].astype(float)
         volumes = frame["v"].astype(float)
         price = float(closes.iloc[-1])
@@ -124,8 +129,9 @@ def get_btc_market_context():
             "summary": summary,
         }
     except Exception as exc:
+        detail = str(exc) if str(exc).startswith("Hyperliquid") else type(exc).__name__
         return {
             "status": "unknown/stale",
             "source": SOURCE_NAME,
-            "error": f"independent BTC fetch failed: {type(exc).__name__}",
+            "error": f"independent BTC fetch failed: {detail}",
         }

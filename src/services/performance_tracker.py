@@ -197,18 +197,26 @@ def evaluate_candle_path_detailed(suggestion, klines, now=None):
 
     expected_interval = _candle_interval(frame)
     path_window = frame[(frame['timestamp'] > pd.Timestamp(created_at)) &
-                        (frame['timestamp'] <= pd.Timestamp(min(now, window_end)))].copy()
+                        (frame['timestamp'] + pd.Timedelta(seconds=expected_interval.total_seconds()) <= pd.Timestamp(min(now, window_end)))].copy()
     observation_limit = pd.Timestamp(window_end) + pd.Timedelta(seconds=expected_interval.total_seconds())
     observation_window = frame[(frame['timestamp'] > pd.Timestamp(created_at)) &
                                (frame['timestamp'] <= observation_limit)].copy()
-    missing = _missing_interior_candles(path_window, expected_interval, start=created_at)
+    coverage_window = path_window if not path_window.empty else observation_window
+    missing = _missing_interior_candles(coverage_window, expected_interval, start=created_at)
     result['missing_candles'] = missing
 
-    endpoint = observation_window[observation_window['timestamp'] >= pd.Timestamp(window_end)]
-    if endpoint.empty:
-        before = observation_window[observation_window['timestamp'] < pd.Timestamp(window_end)]
-        if not before.empty and (pd.Timestamp(window_end) - before.iloc[-1]['timestamp']) <= expected_interval * 1.5:
-            endpoint = before.tail(1)
+    exact = observation_window[observation_window['timestamp'] == pd.Timestamp(window_end)]
+    before = observation_window[observation_window['timestamp'] < pd.Timestamp(window_end)]
+    after = observation_window[observation_window['timestamp'] > pd.Timestamp(window_end)]
+    if not exact.empty:
+        endpoint = exact.tail(1)
+    elif not before.empty and (pd.Timestamp(window_end) - before.iloc[-1]['timestamp']) <= expected_interval * 1.5:
+        # Candle timestamps are opens; prefer the last observation not after the cutoff.
+        endpoint = before.tail(1)
+    elif not after.empty and (after.iloc[0]['timestamp'] - pd.Timestamp(window_end)) <= expected_interval * 1.5:
+        endpoint = after.head(1)
+    else:
+        endpoint = observation_window.iloc[0:0]
     boundary_offset_minutes = None
     if not endpoint.empty:
         endpoint_timestamp = endpoint.iloc[-1]['timestamp']
