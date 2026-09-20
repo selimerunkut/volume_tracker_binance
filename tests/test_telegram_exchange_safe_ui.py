@@ -243,7 +243,7 @@ def test_analyze_command_adds_clearly_labeled_openrouter_comparison(monkeypatch)
     assert text.index('[DETERMINISTIC]') < text.index('LLM COMPARISON')
     assert 'Informational only — not stored or tracked.' in text
     assert 'Signal comparison' in text
-    assert 'Legacy result' not in text
+    assert 'Legacy result' in text
     assert 'SHORT' in text
     assert final['reply_markup'].inline_keyboard[0][0].callback_data == 'details_12'
 
@@ -281,7 +281,7 @@ def test_analyze_command_shows_shared_btc_context_once(monkeypatch):
     text = update.effective_message.calls[-1]['text']
     assert text.count('<b>BTC market context</b>') == 1
     assert text.count('Signal comparison') == 1
-    assert 'repeated indicators' not in text
+    assert 'repeated indicators' in text
 
 
 def test_analyze_command_accepts_ask_parameter_for_scope_picker(monkeypatch):

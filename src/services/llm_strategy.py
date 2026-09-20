@@ -148,7 +148,7 @@ INSTRUCTIONS:
 3. Consider macro conditions - Fed rate changes and Nasdaq trends affect crypto.
 4. Determine if there is a Setup (LONG, SHORT, or WAIT).
 5. If LONG or SHORT, provide Entry, Take Profit (TP), and Stop Loss (SL).
-6. Provide a brief reasoning (max 1 sentence). Do not repeat raw indicator values or the shared BTC market context; state only the conclusion and whether it agrees with the deterministic signal.
+6. Provide a brief reasoning (max 2 sentences) with the relevant evidence for the LLM conclusion. Avoid repeating the shared BTC market context more than necessary.
 
 OUTPUT FORMAT (JSON ONLY):
 {{

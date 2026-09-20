@@ -458,6 +458,7 @@ def format_strategy_message(strategy, symbol, exchange_name, label, include_btc_
 def format_comparison_message(strategy, symbol, exchange_name, deterministic_action, exchange_neutral=False):
     action = html.escape(str(strategy.get('action', 'N/A')))
     confidence = strategy.get('confidence', 0)
+    reasoning = html.escape(str(strategy.get('reasoning', 'N/A')))
     deterministic_text = html.escape(str(deterministic_action or 'N/A'))
     normalized_action = str(strategy.get('action', '')).upper()
     normalized_deterministic = str(deterministic_action or '').upper()
@@ -471,7 +472,8 @@ def format_comparison_message(strategy, symbol, exchange_name, deterministic_act
         f"🤖 <b>{title}</b> "
         f"<i>[LLM COMPARISON]</i>\n\n"
         f"<b>Action</b>: {action} (Confidence score: {confidence}; <i>uncalibrated</i>)\n"
-        f"<b>Signal comparison</b>: OpenRouter {comparison}."
+        f"<b>Signal comparison</b>: OpenRouter {comparison}.\n"
+        f"<b>Reasoning</b>: {reasoning}"
     )
 
 
