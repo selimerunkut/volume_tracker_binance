@@ -302,10 +302,14 @@ def scan_exchange(exchange, symbol_manager, excluded_symbols, dry_run, alerts_en
                 try:
                     auto_signal = create_auto_signal(symbol, exchange.name)
                     if event_id is not None:
+                        auto_analysis = (auto_signal or {}).get('analysis_data') or {}
                         update_volume_alert_event(
                             event_id,
                             auto_signal_id=(auto_signal or {}).get('suggestion_id'),
                             auto_signal_status='created' if auto_signal else 'skipped',
+                            indicator_snapshot=json.dumps(auto_analysis.get('indicators') or {}),
+                            strategy_action=auto_analysis.get('action'),
+                            strategy_score=auto_analysis.get('score'),
                         )
                 except Exception as auto_error:
                     print(f"[{datetime.datetime.now()}] Auto-signal failed for {exchange.name} {symbol}: {auto_error}")

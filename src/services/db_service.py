@@ -152,6 +152,9 @@ def init_db():
             last_4h_volume REAL,
             open_price REAL,
             close_price REAL,
+            indicator_snapshot TEXT,
+            strategy_action TEXT,
+            strategy_score INTEGER,
             auto_signal_id INTEGER,
             auto_signal_status TEXT,
             send_status TEXT NOT NULL DEFAULT 'qualified',
@@ -163,6 +166,15 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_volume_alert_events_exchange_symbol_time
         ON volume_alert_events (exchange_name, symbol, detected_at)
     ''')
+    for column, definition in (
+        ('indicator_snapshot', 'TEXT'),
+        ('strategy_action', 'TEXT'),
+        ('strategy_score', 'INTEGER'),
+    ):
+        try:
+            cursor.execute(f'ALTER TABLE volume_alert_events ADD COLUMN {column} {definition}')
+        except sqlite3.OperationalError:
+            pass
 
     try:
         cursor.execute("ALTER TABLE suggestions ADD COLUMN analysis_data TEXT")
@@ -321,6 +333,9 @@ def update_volume_alert_event(
     send_error=None,
     auto_signal_id=None,
     auto_signal_status=None,
+    indicator_snapshot=None,
+    strategy_action=None,
+    strategy_score=None,
 ):
     """Record downstream auto-signal and Telegram delivery outcomes."""
     updates = []
@@ -330,6 +345,9 @@ def update_volume_alert_event(
         ('send_error', send_error),
         ('auto_signal_id', auto_signal_id),
         ('auto_signal_status', auto_signal_status),
+        ('indicator_snapshot', indicator_snapshot),
+        ('strategy_action', strategy_action),
+        ('strategy_score', strategy_score),
     ):
         if value is not None:
             updates.append(f'{column} = ?')
