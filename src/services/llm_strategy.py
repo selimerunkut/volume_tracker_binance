@@ -19,6 +19,8 @@ logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
 logger = logging.getLogger(__name__)
 
 CREDENTIALS_FILE = 'credentials_b.json'
+CONFIG_FILE = 'config.json'
+DEFAULT_LLM_MODEL = 'z-ai/glm-5.3-flash'
 
 def load_credentials():
     """Load API keys from credentials file."""
@@ -57,11 +59,21 @@ def safe_format(value, fmt=".2f"):
     except (ValueError, TypeError):
         return str(value)
 
+def load_config():
+    """Load non-secret runtime configuration."""
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r') as f:
+                return json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning("Error loading config: %s", type(e).__name__)
+    return {}
+
+
 def get_llm_model():
-    """Get the LLM model ID from credentials or default."""
-    creds = load_credentials()
-    # Default to a more stable model ID
-    return creds.get('llm_model', 'google/gemini-2.0-flash-001')
+    """Get the single configured OpenRouter model."""
+    config = load_config()
+    return config.get('llm_model') or os.getenv('LLM_MODEL') or DEFAULT_LLM_MODEL
 
 
 def normalize_exchange_name(exchange_name='binance'):

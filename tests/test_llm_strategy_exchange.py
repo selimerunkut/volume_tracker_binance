@@ -30,6 +30,15 @@ def _fake_llm_client(response_payload):
     )
 
 
+def test_llm_model_comes_from_external_config(monkeypatch, tmp_path):
+    config_path = tmp_path / 'config.json'
+    config_path.write_text(json.dumps({'llm_model': 'z-ai/glm-5.3-flash'}))
+    monkeypatch.setattr(llm_strategy, 'CONFIG_FILE', str(config_path))
+    monkeypatch.delenv('LLM_MODEL', raising=False)
+
+    assert llm_strategy.get_llm_model() == 'z-ai/glm-5.3-flash'
+
+
 def test_analyze_and_suggest_uses_requested_exchange(monkeypatch):
     observed = {}
 

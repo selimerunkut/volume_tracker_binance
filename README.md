@@ -71,9 +71,13 @@ This project tracks cryptocurrency volume on Binance and Kraken and sends alerts
     Optional legacy LLM comparison credentials can also be added:
     ```json
       "llm_api_key": "YOUR_LLM_API_KEY",
-      "llm_base_url": "https://openrouter.ai/api/v1",
-      "llm_model": "google/gemini-2.5-flash-lite"
+      "llm_base_url": "https://openrouter.ai/api/v1"
     ```
+    Put the non-secret model setting in `config.json`:
+    ```json
+    {"llm_model": "z-ai/glm-5.3-flash"}
+    ```
+
     **Important:**
     - Ensure the keys for Telegram credentials are exactly `telegram_bot_token` and `telegram_chat_id` (lowercase 't').
     - The deterministic signal does not require AI credentials; the legacy comparison is unavailable without them.

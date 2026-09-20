@@ -10,6 +10,7 @@ venv/
 
 # Specific to this project
 credentials_b.json
+config.json
 
 .DS_Store
 cex_volume_tracker.egg-info

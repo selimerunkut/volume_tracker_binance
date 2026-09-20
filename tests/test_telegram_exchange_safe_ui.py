@@ -18,13 +18,8 @@ from src.services.watchlist_manager import WatchlistManager
 def disable_legacy_llm_by_default(monkeypatch):
     monkeypatch.setattr(
         telegram_bot_handler,
-        'legacy_analyze_and_suggest',
+        'llm_analyze_and_suggest',
         lambda symbol, exchange_name='binance': {'error': 'LLM client not configured'},
-    )
-    monkeypatch.setattr(
-        telegram_bot_handler,
-        'deepseek_analyze_and_suggest',
-        lambda symbol, exchange_name='binance', model=None: {'error': 'LLM client not configured'},
     )
 
 
@@ -209,7 +204,7 @@ def test_analyze_command_defaults_to_all_exchanges_without_scope_picker(monkeypa
     assert any('Analyzing SUIUSD on BINANCE, KRAKEN' in text for text in texts)
 
 
-def test_analyze_command_adds_clearly_labeled_legacy_comparison(monkeypatch):
+def test_analyze_command_adds_clearly_labeled_openrouter_comparison(monkeypatch):
     monkeypatch.setattr(telegram_bot_handler, 'get_supported_exchange_names', lambda: ['binance'])
     monkeypatch.setattr(telegram_bot_handler, 'validate_trading_pair', lambda symbol, exchange_name='binance': (True, None))
 
@@ -235,7 +230,7 @@ def test_analyze_command_adds_clearly_labeled_legacy_comparison(monkeypatch):
         }
 
     monkeypatch.setattr(telegram_bot_handler, 'analyze_and_suggest', fake_deterministic)
-    monkeypatch.setattr(telegram_bot_handler, 'legacy_analyze_and_suggest', fake_legacy)
+    monkeypatch.setattr(telegram_bot_handler, 'llm_analyze_and_suggest', fake_legacy)
 
     update = _make_update()
     context = SimpleNamespace(user_data={}, args=['BTCUSDC'])
@@ -244,42 +239,10 @@ def test_analyze_command_adds_clearly_labeled_legacy_comparison(monkeypatch):
 
     final = update.effective_message.calls[-1]
     text = final['text']
-    assert text.index('[DETERMINISTIC]') < text.index('LEGACY LLM COMPARISON')
+    assert text.index('[DETERMINISTIC]') < text.index('OPENROUTER LLM COMPARISON')
     assert 'Informational only — not stored or tracked.' in text
     assert 'SHORT' in text
     assert final['reply_markup'].inline_keyboard[0][0].callback_data == 'details_12'
-
-
-def test_analyze_command_adds_deepseek_comparison_below_legacy(monkeypatch):
-    monkeypatch.setattr(telegram_bot_handler, 'get_supported_exchange_names', lambda: ['binance'])
-    monkeypatch.setattr(telegram_bot_handler, 'validate_trading_pair', lambda symbol, exchange_name='binance': (True, None))
-
-    async def fake_deterministic(symbol, exchange_name='binance'):
-        return {'action': 'WAIT', 'confidence': 90, 'reasoning': 'Deterministic result'}
-
-    def fake_legacy(symbol, exchange_name='binance'):
-        return {'action': 'SHORT', 'confidence': 62, 'reasoning': 'Legacy result'}
-
-    observed = {}
-
-    def fake_deepseek(symbol, exchange_name='binance', model=None):
-        observed['model'] = model
-        return {'action': 'LONG', 'confidence': 71, 'reasoning': 'DeepSeek result'}
-
-    monkeypatch.setattr(telegram_bot_handler, 'analyze_and_suggest', fake_deterministic)
-    monkeypatch.setattr(telegram_bot_handler, 'legacy_analyze_and_suggest', fake_legacy)
-    monkeypatch.setattr(telegram_bot_handler, 'deepseek_analyze_and_suggest', fake_deepseek)
-
-    update = _make_update()
-    context = SimpleNamespace(user_data={}, args=['BTCUSDC'])
-
-    asyncio.run(telegram_bot_handler.analyze_symbol(update, context))
-
-    text = update.effective_message.calls[-1]['text']
-    assert text.index('[DETERMINISTIC]') < text.index('LEGACY LLM COMPARISON')
-    assert text.index('LEGACY LLM COMPARISON') < text.index('DEEPSEEK LLM COMPARISON')
-    assert 'DeepSeek result' in text
-    assert observed['model'] == 'deepseek/deepseek-v4-flash'
 
 
 def test_analyze_command_accepts_ask_parameter_for_scope_picker(monkeypatch):
