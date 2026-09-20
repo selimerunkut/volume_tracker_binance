@@ -21,7 +21,12 @@ from src.services.volume_alerts import (
 from src.services.quote_value_service import to_usd_quote_value
 from src.services.liquidity_analysis import analyze_entry_liquidity
 from src.services.binance_permissions_service import permissions_service
-from src.services.db_service import get_setting
+from src.services.db_service import (
+    get_setting,
+    init_db,
+    save_volume_alert_event,
+    update_volume_alert_event,
+)
 from src.services.auto_signal_service import create_auto_signal
 
 
@@ -244,26 +249,77 @@ def scan_exchange(exchange, symbol_manager, excluded_symbols, dry_run, alerts_en
                 print(f"[{datetime.datetime.now()}] Alerts generated for {symbol}: {len(alert_details_list)}")
             else:
                 print(f"[{datetime.datetime.now()}] No alerts for {symbol}.")
+
+            detected_at = datetime.datetime.now(datetime.timezone.utc)
+            candle_start = pd.Timestamp(df['timestamp'].iloc[-1])
+            if candle_start.tzinfo is None:
+                candle_start = candle_start.tz_localize('UTC')
+            else:
+                candle_start = candle_start.tz_convert('UTC')
+            candle_elapsed_seconds = max(
+                0.0,
+                detected_at.timestamp() - candle_start.timestamp(),
+            )
+
             for alert_detail in alert_details_list:
                 symbol = alert_detail['symbol']
                 level = alert_detail['level']
+                event_id = None
+                try:
+                    event_id = save_volume_alert_event(
+                        detected_at=detected_at.isoformat(),
+                        candle_start=candle_start.isoformat(),
+                        candle_elapsed_seconds=candle_elapsed_seconds,
+                        exchange_name=exchange.name,
+                        symbol=symbol,
+                        timeframe='1h',
+                        level=level,
+                        curr_volume=float(curr_volume),
+                        prev_volume_mean=float(prev_volume_mean),
+                        last_completed_hour_volume=float(last_completed_hour_volume),
+                        last_2h_volume=float(last_2h_volume),
+                        last_4h_volume=float(last_4h_volume),
+                        open_price=float(open_price),
+                        close_price=float(close_price),
+                    )
+                except Exception as event_error:
+                    print(f"[{datetime.datetime.now()}] Volume event persistence failed for {exchange.name} {symbol}: {event_error}")
 
                 # Check if the symbol is in the restricted list before proceeding
                 if symbol_manager.is_symbol_excluded(symbol):
                     print(f"[{datetime.datetime.now()}] Skipping alert for restricted symbol: {symbol}")
+                    if event_id is not None:
+                        update_volume_alert_event(event_id, send_status='restricted')
                     continue
 
                 if is_duplicate_alert(exchange.name, symbol, level, curr_volume):
                     # The DEBUG print inside is_duplicate_alert is sufficient
+                    if event_id is not None:
+                        update_volume_alert_event(event_id, send_status='deduped')
                     continue # Skip sending this alert
 
+                auto_signal = None
                 try:
-                    create_auto_signal(symbol, exchange.name)
+                    auto_signal = create_auto_signal(symbol, exchange.name)
+                    if event_id is not None:
+                        update_volume_alert_event(
+                            event_id,
+                            auto_signal_id=(auto_signal or {}).get('suggestion_id'),
+                            auto_signal_status='created' if auto_signal else 'skipped',
+                        )
                 except Exception as auto_error:
                     print(f"[{datetime.datetime.now()}] Auto-signal failed for {exchange.name} {symbol}: {auto_error}")
+                    if event_id is not None:
+                        update_volume_alert_event(
+                            event_id,
+                            auto_signal_status='failed',
+                            send_error=str(auto_error),
+                        )
 
                 if not alerts_enabled:
                     print(f"[{datetime.datetime.now()}] Skipping Telegram message for {symbol} - Alerts are DISABLED in settings.")
+                    if event_id is not None:
+                        update_volume_alert_event(event_id, send_status='disabled')
                     continue
 
                 alert_message = create_alert_message(
@@ -286,10 +342,22 @@ def scan_exchange(exchange, symbol_manager, excluded_symbols, dry_run, alerts_en
                     alert_message['liquidity'] = {'unavailable': True}
 
                 print(f"[{datetime.datetime.now()}] Sending Telegram message for {symbol} (Level: {level})...")
-                with telegram_send_lock:
-                    sent = send_telegram_message(alert_message, include_restrict_button=True, dry_run=dry_run)
-                    if sent and not dry_run:
-                        time.sleep(1)
+                send_error = None
+                try:
+                    with telegram_send_lock:
+                        sent = send_telegram_message(alert_message, include_restrict_button=True, dry_run=dry_run)
+                        if sent and not dry_run:
+                            time.sleep(1)
+                except Exception as telegram_error:
+                    sent = False
+                    send_error = str(telegram_error)
+
+                if event_id is not None:
+                    update_volume_alert_event(
+                        event_id,
+                        send_status=('dry_run' if dry_run and sent else 'sent' if sent else 'not_sent'),
+                        send_error=send_error or (None if sent else 'Telegram send returned false'),
+                    )
 
                 if sent and not dry_run:
                     sent_alerts.append((exchange.name, symbol, level, curr_volume))
@@ -335,6 +403,7 @@ def run_script(dry_run=False):
     global last_alert_timestamps
     last_alert_timestamps = load_alert_state()
     print(f"[{datetime.datetime.now()}] Starting run_script...")
+    init_db()
     symbol_manager = SymbolManager()
     excluded_symbols = symbol_manager.get_excluded_symbols()
 

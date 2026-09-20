@@ -135,6 +135,35 @@ def init_db():
         ON signal_trades (symbol, timeframe, action)
     ''')
 
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS volume_alert_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            detected_at TEXT NOT NULL,
+            candle_start TEXT,
+            candle_elapsed_seconds REAL,
+            exchange_name TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            level TEXT NOT NULL,
+            curr_volume REAL NOT NULL,
+            prev_volume_mean REAL NOT NULL,
+            last_completed_hour_volume REAL,
+            last_2h_volume REAL,
+            last_4h_volume REAL,
+            open_price REAL,
+            close_price REAL,
+            auto_signal_id INTEGER,
+            auto_signal_status TEXT,
+            send_status TEXT NOT NULL DEFAULT 'qualified',
+            send_error TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_volume_alert_events_exchange_symbol_time
+        ON volume_alert_events (exchange_name, symbol, detected_at)
+    ''')
+
     try:
         cursor.execute("ALTER TABLE suggestions ADD COLUMN analysis_data TEXT")
     except sqlite3.OperationalError:
@@ -234,6 +263,87 @@ def save_suggestion(symbol, strategy_type, entry_price, take_profit, stop_loss, 
     
     print(f"[{datetime.now()}] Saved suggestion #{suggestion_id} for {symbol}")
     return suggestion_id
+
+
+def save_volume_alert_event(
+    *,
+    detected_at,
+    candle_start,
+    candle_elapsed_seconds,
+    exchange_name,
+    symbol,
+    timeframe,
+    level,
+    curr_volume,
+    prev_volume_mean,
+    last_completed_hour_volume=None,
+    last_2h_volume=None,
+    last_4h_volume=None,
+    open_price=None,
+    close_price=None,
+):
+    """Persist a qualifying volume event before cooldown or Telegram delivery."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO volume_alert_events (
+            detected_at, candle_start, candle_elapsed_seconds, exchange_name,
+            symbol, timeframe, level, curr_volume, prev_volume_mean,
+            last_completed_hour_volume, last_2h_volume, last_4h_volume,
+            open_price, close_price
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        detected_at,
+        candle_start,
+        candle_elapsed_seconds,
+        str(exchange_name).lower(),
+        str(symbol).upper(),
+        timeframe,
+        level,
+        curr_volume,
+        prev_volume_mean,
+        last_completed_hour_volume,
+        last_2h_volume,
+        last_4h_volume,
+        open_price,
+        close_price,
+    ))
+    event_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return event_id
+
+
+def update_volume_alert_event(
+    event_id,
+    *,
+    send_status=None,
+    send_error=None,
+    auto_signal_id=None,
+    auto_signal_status=None,
+):
+    """Record downstream auto-signal and Telegram delivery outcomes."""
+    updates = []
+    values = []
+    for column, value in (
+        ('send_status', send_status),
+        ('send_error', send_error),
+        ('auto_signal_id', auto_signal_id),
+        ('auto_signal_status', auto_signal_status),
+    ):
+        if value is not None:
+            updates.append(f'{column} = ?')
+            values.append(value)
+    if not updates:
+        return
+    values.append(event_id)
+    conn = get_connection()
+    conn.execute(
+        f"UPDATE volume_alert_events SET {', '.join(updates)} WHERE id = ?",
+        values,
+    )
+    conn.commit()
+    conn.close()
 
 
 def save_signal_trade(symbol, timeframe, signal_type, action, entry_price, explanation=None, dedup_key=None, entry_ts=None):

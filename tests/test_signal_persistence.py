@@ -29,6 +29,56 @@ def _clear_signal_table():
     conn.close()
 
 
+def _clear_volume_alert_event_table():
+    conn = db_service.get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM volume_alert_events')
+    conn.commit()
+    conn.close()
+
+
+def test_volume_alert_event_captures_delivery_outcome():
+    _clear_volume_alert_event_table()
+    event_id = db_service.save_volume_alert_event(
+        detected_at='2026-09-20T12:00:00+00:00',
+        candle_start='2026-09-20T12:00:00+00:00',
+        candle_elapsed_seconds=15.0,
+        exchange_name='kraken',
+        symbol='SUIUSD',
+        timeframe='1h',
+        level='500%+',
+        curr_volume=78674.0,
+        prev_volume_mean=13125.0,
+        last_completed_hour_volume=8341.0,
+        last_2h_volume=13912.0,
+        last_4h_volume=39002.0,
+        open_price=0.1617,
+        close_price=0.1634,
+    )
+
+    db_service.update_volume_alert_event(
+        event_id,
+        auto_signal_id=42,
+        auto_signal_status='created',
+        send_status='sent',
+    )
+
+    conn = db_service.get_connection()
+    row = conn.execute(
+        'SELECT * FROM volume_alert_events WHERE id = ?',
+        (event_id,),
+    ).fetchone()
+    conn.close()
+
+    assert row['exchange_name'] == 'kraken'
+    assert row['symbol'] == 'SUIUSD'
+    assert row['level'] == '500%+'
+    assert row['curr_volume'] == 78674.0
+    assert row['auto_signal_id'] == 42
+    assert row['auto_signal_status'] == 'created'
+    assert row['send_status'] == 'sent'
+
+
 def test_signal_save_and_retrieve():
     _clear_signal_table()
     entry_ts = datetime.now().isoformat()
