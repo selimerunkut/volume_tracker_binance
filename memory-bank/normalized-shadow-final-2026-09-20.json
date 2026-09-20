@@ -1,0 +1,74 @@
+{
+  "as_of": "2026-09-20T19:29:27.351908+00:00",
+  "phase": "final",
+  "conclusion": "insufficient evidence",
+  "final": true,
+  "stopping_reason": "Explicit final-validation request received before any primary-horizon outcome matured.",
+  "counts": {
+    "raw_events": 8,
+    "deduplicated_observations": 1,
+    "mature_24h_observations": 0,
+    "eligible_event_ids": []
+  },
+  "policy_metrics": {
+    "every_alert": {
+      "cohort_n": 0,
+      "trades": 0,
+      "mean_net_percent": null,
+      "median_net_percent": null
+    },
+    "current_long_filter": {
+      "cohort_n": 0,
+      "trades": 0,
+      "mean_net_percent": null,
+      "median_net_percent": null
+    },
+    "normalized_long_filter": {
+      "cohort_n": 0,
+      "trades": 0,
+      "mean_net_percent": null,
+      "median_net_percent": null
+    },
+    "cash": {
+      "cohort_n": 0,
+      "trades": 0,
+      "mean_net_percent": null,
+      "median_net_percent": null
+    }
+  },
+  "protocol": {
+    "primary_horizon_hours": 24,
+    "entry_price": "close_price captured with the raw event",
+    "exit_price": "latest completed 1h candle close at or before the horizon; no future candle close",
+    "maturity_gate": "detected_at + horizon <= as_of",
+    "dedupe_key": ["exchange_name", "symbol", "timeframe", "candle_start", "level"],
+    "every_alert_policy": "execute LONG entry for every eligible observation",
+    "current_filter_policy": "execute only when strategy_action is LONG; otherwise zero return",
+    "normalized_filter_policy": "execute only when normalized_action is LONG; WAIT or missing score abstains with zero return",
+    "short_semantics": "SHORT is abstention, not a short trade",
+    "trading_cost_percent": 0.2,
+    "cost_application": "only executed virtual trades; cash has zero cost",
+    "independence_note": "repeated scanner observations were deduplicated; the only unique observation was OKX FET-USDC 1500%+ on the 2026-09-20T19:00:00Z candle"
+  },
+  "deployment": {
+    "scorer_sha": "d502df08fa2ff3d02ae45202ab5c3d8817e58708",
+    "report_sha": "fee5029cdf03ac59adebf3e9d9015b8f99a6ad23",
+    "database_sha256": "35f82a0772860ffc770a049ee80a550e0fd7b9ac91e237ca68402573ac0a0518",
+    "live_behavior_unchanged": true,
+    "services": {
+      "binance-volume-tracker.service": "active",
+      "binance-strategy-bot.service": "active"
+    }
+  },
+  "reproduction": {
+    "source": "src/services/volume_alert_evaluation.py",
+    "remote_database": "/opt/volume_tracker_binance/trading_memory.db",
+    "command": "cd /opt/volume_tracker_binance && .venv/bin/python - <<'PY' ... load volume_alert_events, call deduplicate_alert_events(events), call evaluate_matched_events(events, candles_by_key, [24], as_of=as_of), then call compare_baselines(records, 24, cost_percent=0.2) ... PY",
+    "observed_metrics": {
+      "raw_events": 8,
+      "deduplicated_observations": 1,
+      "mature_24h_observations": 0
+    }
+  },
+  "decision": "No normalized-strength, current-filter, or every-alert performance estimate is reported. The dataset contains no eligible primary-horizon outcome, so the experiment cannot support or reject the filter. No live policy change is authorized."
+}
