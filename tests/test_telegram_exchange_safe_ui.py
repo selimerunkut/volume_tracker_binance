@@ -19,7 +19,7 @@ def disable_legacy_llm_by_default(monkeypatch):
     monkeypatch.setattr(
         telegram_bot_handler,
         'llm_analyze_and_suggest',
-        lambda symbol, exchange_name='binance': {'error': 'LLM client not configured'},
+        lambda symbol, exchange_name='binance', **kwargs: {'error': 'LLM client not configured'},
     )
 
 
@@ -219,7 +219,7 @@ def test_analyze_command_adds_clearly_labeled_openrouter_comparison(monkeypatch)
             'suggestion_id': 12,
         }
 
-    def fake_legacy(symbol, exchange_name='binance'):
+    def fake_legacy(symbol, exchange_name='binance', **kwargs):
         return {
             'action': 'SHORT',
             'confidence': 62,
@@ -241,8 +241,46 @@ def test_analyze_command_adds_clearly_labeled_openrouter_comparison(monkeypatch)
     text = final['text']
     assert text.index('[DETERMINISTIC]') < text.index('OPENROUTER LLM COMPARISON')
     assert 'Informational only — not stored or tracked.' in text
+    assert 'Signal comparison' in text
+    assert 'Legacy result' not in text
     assert 'SHORT' in text
     assert final['reply_markup'].inline_keyboard[0][0].callback_data == 'details_12'
+
+
+def test_analyze_command_shows_shared_btc_context_once(monkeypatch):
+    monkeypatch.setattr(telegram_bot_handler, 'get_supported_exchange_names', lambda: ['binance', 'okx'])
+    monkeypatch.setattr(telegram_bot_handler, 'validate_trading_pair', lambda symbol, exchange_name='binance': (True, None))
+
+    async def fake_deterministic(symbol, exchange_name='binance'):
+        return {
+            'action': 'WAIT',
+            'confidence': 70,
+            'reasoning': f'{exchange_name} details',
+            'analysis_data': {
+                'btc_market_context': {
+                    'status': 'ok',
+                    'summary': 'BTC is bearish.',
+                    'source': 'test',
+                    'as_of': '2026-09-20T10:59:59+00:00',
+                    'age_minutes': 44,
+                },
+            },
+        }
+
+    def fake_legacy(symbol, exchange_name='binance', **kwargs):
+        return {'action': 'WAIT', 'confidence': 65, 'reasoning': 'repeated indicators'}
+
+    monkeypatch.setattr(telegram_bot_handler, 'analyze_and_suggest', fake_deterministic)
+    monkeypatch.setattr(telegram_bot_handler, 'llm_analyze_and_suggest', fake_legacy)
+
+    update = _make_update()
+    context = SimpleNamespace(user_data={}, args=['BTCUSDC'])
+    asyncio.run(telegram_bot_handler.analyze_symbol(update, context))
+
+    text = update.effective_message.calls[-1]['text']
+    assert text.count('<b>BTC market context</b>') == 1
+    assert text.count('Signal comparison') == 2
+    assert 'repeated indicators' not in text
 
 
 def test_analyze_command_accepts_ask_parameter_for_scope_picker(monkeypatch):

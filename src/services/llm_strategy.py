@@ -121,7 +121,7 @@ def construct_context(ta_data, news, history, failures, macro_data):
         
     return ta_summary, news_summary, macro_summary, memory_section, mistakes_section
 
-def construct_prompt(symbol, price_data, ta_summary, news_summary, macro_summary, memory_section, mistakes_section, exchange_name='binance'):
+def construct_prompt(symbol, price_data, ta_summary, news_summary, macro_summary, memory_section, mistakes_section, exchange_name='binance', comparison_action=None):
     prompt = f"""
 You are a professional crypto trading advisor. Analyze the following data for {symbol} on the {exchange_name.upper()} exchange and suggest a trading strategy.
 
@@ -139,13 +139,16 @@ MEMORY (Learn from this):
 {memory_section}
 {mistakes_section}
 
+COMPARISON TARGET:
+The deterministic rules produced {comparison_action or 'an unavailable'}.
+
 INSTRUCTIONS:
 1. Analyze the technicals, news sentiment, and macro conditions.
 2. Consider your past performance (wins/losses). If you lost recently, adjust your strategy to avoid the same mistake.
 3. Consider macro conditions - Fed rate changes and Nasdaq trends affect crypto.
 4. Determine if there is a Setup (LONG, SHORT, or WAIT).
 5. If LONG or SHORT, provide Entry, Take Profit (TP), and Stop Loss (SL).
-6. Provide a brief reasoning (max 2 sentences).
+6. Provide a brief reasoning (max 1 sentence). Do not repeat raw indicator values or the shared BTC market context; state only the conclusion and whether it agrees with the deterministic signal.
 
 OUTPUT FORMAT (JSON ONLY):
 {{
@@ -160,7 +163,7 @@ OUTPUT FORMAT (JSON ONLY):
     return prompt
 
 
-def analyze_and_suggest(symbol, exchange_name='binance', model=None):
+def analyze_and_suggest(symbol, exchange_name='binance', model=None, comparison_action=None):
     """
     Main function to analyze a symbol and generate a strategy.
     """
@@ -207,6 +210,7 @@ def analyze_and_suggest(symbol, exchange_name='binance', model=None):
             memory_section,
             mistakes_section,
             exchange_name=exchange_name,
+            comparison_action=comparison_action,
         )
         
         client = get_llm_client()

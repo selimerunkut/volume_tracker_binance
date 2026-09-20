@@ -375,7 +375,7 @@ def _format_regime_data_age(regime):
     )
 
 
-def format_strategy_message(strategy, symbol, exchange_name, label):
+def format_strategy_message(strategy, symbol, exchange_name, label, include_btc_context=True):
     action = html.escape(str(strategy.get('action', 'N/A')))
     confidence = strategy.get('confidence', 0)
     reasoning = html.escape(str(strategy.get('reasoning', 'N/A')))
@@ -398,7 +398,7 @@ def format_strategy_message(strategy, symbol, exchange_name, label):
     response += f"<b>Reasoning</b>: {reasoning}"
     analysis_data = strategy.get('analysis_data') or {}
     btc_context = analysis_data.get('btc_market_context') or {}
-    if btc_context:
+    if include_btc_context and btc_context:
         response += "\n\n<b>BTC market context</b>:"
         if btc_context.get('status') != 'ok':
             response += (
@@ -452,6 +452,24 @@ def format_strategy_message(strategy, symbol, exchange_name, label):
         else:
             response += f"\n{altseason_link}: unknown/stale"
     return response
+
+
+def format_comparison_message(strategy, symbol, exchange_name, deterministic_action):
+    action = html.escape(str(strategy.get('action', 'N/A')))
+    confidence = strategy.get('confidence', 0)
+    deterministic_text = html.escape(str(deterministic_action or 'N/A'))
+    normalized_action = str(strategy.get('action', '')).upper()
+    normalized_deterministic = str(deterministic_action or '').upper()
+    if normalized_action == normalized_deterministic and normalized_action:
+        comparison = f"agrees with the deterministic {deterministic_text} signal"
+    else:
+        comparison = f"differs from the deterministic {deterministic_text} signal"
+    return (
+        f"🤖 <b>{html.escape(exchange_name.upper())} strategy for {html.escape(str(symbol))}</b> "
+        f"<i>[OPENROUTER LLM COMPARISON]</i>\n\n"
+        f"<b>Action</b>: {action} (Confidence score: {confidence}; <i>uncalibrated</i>)\n"
+        f"<b>Signal comparison</b>: OpenRouter {comparison}."
+    )
 
 
 def get_pair_button_analysis_mode():
@@ -955,6 +973,7 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
     try:
         responses = []
         detail_buttons = []
+        btc_context_included = False
         for exchange_name in exchanges:
             try:
                 validation_candidate = await asyncio.to_thread(validate_trading_pair, symbol, exchange_name=exchange_name)
@@ -988,13 +1007,22 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
                 responses.append(format_analysis_error_message(symbol, exchange_name, strategy['error']))
                 continue
 
-            responses.append(format_strategy_message(strategy, symbol, exchange_name, 'DETERMINISTIC'))
+            responses.append(format_strategy_message(
+                strategy,
+                symbol,
+                exchange_name,
+                'DETERMINISTIC',
+                include_btc_context=not btc_context_included,
+            ))
+            if (strategy.get('analysis_data') or {}).get('btc_market_context'):
+                btc_context_included = True
 
             try:
                 legacy_candidate = await asyncio.to_thread(
                     llm_analyze_and_suggest,
                     symbol,
                     exchange_name=exchange_name,
+                    comparison_action=strategy.get('action'),
                 )
                 legacy_strategy = legacy_candidate
                 if inspect.isawaitable(legacy_candidate):
@@ -1009,11 +1037,11 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
                 legacy_strategy = {"error": str(legacy_error)}
 
             if legacy_strategy and 'error' not in legacy_strategy:
-                legacy_response = format_strategy_message(
+                legacy_response = format_comparison_message(
                     legacy_strategy,
                     symbol,
                     exchange_name,
-                    'OPENROUTER LLM COMPARISON',
+                    strategy.get('action'),
                 )
                 legacy_response += "\n\n<i>Informational only — not stored or tracked.</i>"
             else:
