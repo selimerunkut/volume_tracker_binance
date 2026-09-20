@@ -76,16 +76,39 @@ def test_matched_evaluation_excludes_event_missing_any_horizon():
     assert evaluate_matched_events(events, candles, [1, 2, 3]) == []
 
 
+def test_maturity_gate_excludes_events_without_a_completed_horizon():
+    events = [_event(1)]
+    candles = {("kraken", "SUIUSD"): _candles()}
+
+    assert evaluate_matched_events(
+        events,
+        candles,
+        [1],
+        as_of="2026-01-01T00:30:00+00:00",
+    ) == []
+    assert evaluate_matched_events(
+        events,
+        candles,
+        [1],
+        as_of="2026-01-01T01:30:00+00:00",
+    )
+
+
 def test_baselines_share_the_same_eligible_cohort():
     events = [
-        {**_event(1, action="LONG"), "candle_start": "2026-01-01T00:00:00+00:00"},
-        {**_event(2, action="WAIT"), "candle_start": "2026-01-01T01:00:00+00:00"},
+        {**_event(1, action="LONG"), "normalized_action": "LONG", "candle_start": "2026-01-01T00:00:00+00:00"},
+        {**_event(2, action="WAIT"), "normalized_action": "WAIT", "candle_start": "2026-01-01T01:00:00+00:00"},
     ]
     candles = {("kraken", "SUIUSD"): _candles()}
     records = evaluate_matched_events(events, candles, [1])
     baselines = compare_baselines(records, 1, cost_percent=0.2)
 
     assert baselines["every_alert"]["n"] == 2
-    assert baselines["current_long_filter"]["n"] == 1
+    assert baselines["current_long_filter"]["n"] == 2
+    assert baselines["current_long_filter"]["trades"] == 1
+    assert baselines["normalized_long_filter"]["n"] == 2
+    assert baselines["normalized_long_filter"]["trades"] == 1
     assert baselines["cash"]["n"] == 2
+    assert baselines["cash"]["trades"] == 0
     assert baselines["cash"]["mean_percent"] == 0.0
+    assert baselines["cash"]["mean_net_percent"] == 0.0

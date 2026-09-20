@@ -1,0 +1,46 @@
+{
+  "as_of": "2026-09-20T19:23:38Z",
+  "phase": "collecting",
+  "conclusion": "insufficient evidence",
+  "final": false,
+  "counts": {
+    "raw_events": 6,
+    "deduplicated_observations": 1,
+    "mature_24h_observations": 0,
+    "mature_24h_outcomes": 0
+  },
+  "protocol": {
+    "primary_horizon_hours": 24,
+    "entry_price": "close_price captured with the raw event",
+    "exit_price": "latest completed 1h candle close at or before the horizon; no future candle close",
+    "maturity_gate": "detected_at + horizon <= as_of",
+    "dedupe_key": ["exchange_name", "symbol", "timeframe", "candle_start", "level"],
+    "every_alert_policy": "execute LONG entry for every eligible observation",
+    "current_filter_policy": "execute only when strategy_action is LONG; otherwise zero return",
+    "normalized_filter_policy": "execute only when normalized_action is LONG; WAIT or missing score abstains with zero return",
+    "short_semantics": "SHORT is abstention, not a short trade",
+    "trading_cost_percent": 0.2,
+    "cost_application": "only executed virtual trades; cash has zero cost",
+    "independence_note": "deduplication removes repeated scanner observations; symbol/time overlap remains disclosed",
+    "stopping_rule": {
+      "proposal": "Collect through 2026-10-20T19:23:38Z, then allow 24 additional hours for the primary horizon.",
+      "status": "proposed operational bound; not evidence-derived"
+    }
+  },
+  "deployment": {
+    "scorer_sha": "d502df08fa2ff3d02ae45202ab5c3d8817e58708",
+    "report_sha": "794b5d3329d6f775a32cc0314c1969cd4fcc9b23",
+    "database_sha256": "936ce0039f36cafef5660504efb5d8523e65877ccbe6d317a33207eb1e85d638",
+    "live_behavior_unchanged": true
+  },
+  "reproduction": {
+    "host": "PI_BAGENT_HOST",
+    "database": "/opt/volume_tracker_binance/trading_memory.db",
+    "commands": [
+      "sqlite3 trading_memory.db 'select count(*) from volume_alert_events;'",
+      "Use deduplicate_alert_events(events) with the recorded dedupe key.",
+      "Use evaluate_matched_events(events, candles_by_key, [24], as_of=<report as_of>)."
+    ]
+  },
+  "reason": "The current snapshot demonstrates collection feasibility but has one unique observation and no mature 24-hour outcome, so no performance estimate is reported and no live policy change is authorized."
+}
