@@ -10,12 +10,15 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import sys
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.services.volume_alert_evaluation import (
     calculate_forward_return_minutes,
