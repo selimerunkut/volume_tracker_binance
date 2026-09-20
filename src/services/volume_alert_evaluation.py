@@ -62,6 +62,26 @@ def calculate_forward_return(event, candles, horizon_hours, interval=timedelta(h
     return (float(_candle_close(endpoint)) - entry_price) / entry_price * 100
 
 
+def deduplicate_alert_events(events):
+    """Keep one observation per exchange/symbol/candle/level.
+
+    The scanner may inspect the same forming candle several times while a
+    cooldown suppresses delivery. Raw rows remain intact for auditability;
+    outcome studies must not count those repeated observations as trades.
+    """
+    unique = {}
+    for event in sorted(events, key=lambda item: str(item.get("detected_at", ""))):
+        key = (
+            event.get("exchange_name"),
+            event.get("symbol"),
+            event.get("timeframe", "1h"),
+            event.get("candle_start") or event.get("detected_at"),
+            event.get("level"),
+        )
+        unique.setdefault(key, event)
+    return list(unique.values())
+
+
 def evaluate_matched_events(events, candles_by_key, horizons):
     """Evaluate only events complete at every requested horizon.
 
@@ -70,7 +90,7 @@ def evaluate_matched_events(events, candles_by_key, horizons):
     """
     horizons = tuple(sorted(set(int(horizon) for horizon in horizons)))
     records = []
-    for event in events:
+    for event in deduplicate_alert_events(events):
         key = (event["exchange_name"], event["symbol"])
         candles = candles_by_key.get(key, ())
         returns = {
