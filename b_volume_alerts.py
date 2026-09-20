@@ -306,10 +306,13 @@ def scan_exchange(exchange, symbol_manager, excluded_symbols, dry_run, alerts_en
                         update_volume_alert_event(
                             event_id,
                             auto_signal_id=(auto_signal or {}).get('suggestion_id'),
-                            auto_signal_status='created' if auto_signal else 'skipped',
+                            auto_signal_status='created' if (auto_signal or {}).get('persisted') else 'skipped',
                             indicator_snapshot=json.dumps(auto_analysis.get('indicators') or {}),
                             strategy_action=auto_analysis.get('action'),
                             strategy_score=auto_analysis.get('score'),
+                            normalized_strength_snapshot=json.dumps(auto_analysis.get('normalized_strength') or {}),
+                            normalized_action=(auto_analysis.get('normalized_strength') or {}).get('action'),
+                            normalized_score=(auto_analysis.get('normalized_strength') or {}).get('score'),
                         )
                 except Exception as auto_error:
                     print(f"[{datetime.datetime.now()}] Auto-signal failed for {exchange.name} {symbol}: {auto_error}")

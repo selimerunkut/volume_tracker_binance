@@ -155,6 +155,9 @@ def init_db():
             indicator_snapshot TEXT,
             strategy_action TEXT,
             strategy_score INTEGER,
+            normalized_strength_snapshot TEXT,
+            normalized_action TEXT,
+            normalized_score REAL,
             auto_signal_id INTEGER,
             auto_signal_status TEXT,
             send_status TEXT NOT NULL DEFAULT 'qualified',
@@ -170,6 +173,9 @@ def init_db():
         ('indicator_snapshot', 'TEXT'),
         ('strategy_action', 'TEXT'),
         ('strategy_score', 'INTEGER'),
+        ('normalized_strength_snapshot', 'TEXT'),
+        ('normalized_action', 'TEXT'),
+        ('normalized_score', 'REAL'),
     ):
         try:
             cursor.execute(f'ALTER TABLE volume_alert_events ADD COLUMN {column} {definition}')
@@ -336,6 +342,9 @@ def update_volume_alert_event(
     indicator_snapshot=None,
     strategy_action=None,
     strategy_score=None,
+    normalized_strength_snapshot=None,
+    normalized_action=None,
+    normalized_score=None,
 ):
     """Record downstream auto-signal and Telegram delivery outcomes."""
     updates = []
@@ -348,6 +357,9 @@ def update_volume_alert_event(
         ('indicator_snapshot', indicator_snapshot),
         ('strategy_action', strategy_action),
         ('strategy_score', strategy_score),
+        ('normalized_strength_snapshot', normalized_strength_snapshot),
+        ('normalized_action', normalized_action),
+        ('normalized_score', normalized_score),
     ):
         if value is not None:
             updates.append(f'{column} = ?')
