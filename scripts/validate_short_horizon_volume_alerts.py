@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import statistics
 import sys
 import time
 from collections import defaultdict
@@ -152,7 +153,7 @@ def summarize(values, executed, cost_percent=COST_PERCENT):
         "n": len(values),
         "trades": len(trades),
         "mean_net_per_row_percent": sum(net) / len(net),
-        "median_net_per_row_percent": sorted(net)[len(net) // 2],
+        "median_net_per_row_percent": statistics.median(net),
         "total_net_percent": sum(net),
         "trade_mean_gross_percent": sum(trades) / len(trades) if trades else None,
         "trade_mean_net_percent": sum(trade_net) / len(trade_net) if trade_net else None,
@@ -252,28 +253,39 @@ def main():
             for horizon in HORIZONS_MINUTES
         )
     ]
-    summaries = {}
-    for delay in ENTRY_DELAYS_MINUTES:
-        summaries[str(delay)] = {
-            str(horizon): {
-                policy: evaluate_policy(
-                    [
-                        {
-                            "event": record["event"],
-                            "returns": {
-                                "every_alert": record["returns"][delay],
-                                "current_long": record["returns"][delay],
-                            },
-                        }
-                        for record in matched_both
-                    ],
-                    horizon,
-                    policy,
-                )
-                for policy in ("every_alert", "current_long")
+    def build_summaries(cohort):
+        result = {}
+        for delay in ENTRY_DELAYS_MINUTES:
+            result[str(delay)] = {
+                str(horizon): {
+                    policy: evaluate_policy(
+                        [
+                            {
+                                "event": record["event"],
+                                "returns": {
+                                    "every_alert": record["returns"][delay],
+                                    "current_long": record["returns"][delay],
+                                },
+                            }
+                            for record in cohort
+                        ],
+                        horizon,
+                        policy,
+                    )
+                    for policy in ("every_alert", "current_long")
+                }
+                for horizon in HORIZONS_MINUTES
             }
-            for horizon in HORIZONS_MINUTES
-        }
+        return result
+
+    summaries = build_summaries(matched_both)
+    exchange_cohorts = defaultdict(list)
+    for record in matched_both:
+        exchange_cohorts[record["event"]["exchange_name"]].append(record)
+    summaries_by_exchange = {
+        exchange: build_summaries(cohort)
+        for exchange, cohort in sorted(exchange_cohorts.items())
+    }
 
     artifact = {
         "as_of": as_of.isoformat(),
@@ -290,6 +302,10 @@ def main():
         "live_behavior_changed": False,
         "coverage": coverage,
         "summaries_on_common_cohort": summaries,
+        "matched_cohort_by_exchange": {
+            exchange: len(cohort) for exchange, cohort in sorted(exchange_cohorts.items())
+        },
+        "summaries_by_exchange": summaries_by_exchange,
         "errors": errors,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
