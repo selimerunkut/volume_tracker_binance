@@ -240,7 +240,7 @@ def test_analyze_command_adds_clearly_labeled_openrouter_comparison(monkeypatch)
 
     final = update.effective_message.calls[-1]
     text = final['text']
-    assert text.index('[DETERMINISTIC]') < text.index('OPENROUTER LLM COMPARISON')
+    assert text.index('[DETERMINISTIC]') < text.index('LLM COMPARISON')
     assert 'Informational only — not stored or tracked.' in text
     assert 'Signal comparison' in text
     assert 'Legacy result' not in text

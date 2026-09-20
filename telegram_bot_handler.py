@@ -469,7 +469,7 @@ def format_comparison_message(strategy, symbol, exchange_name, deterministic_act
     title = f"{symbol_text} strategy" if exchange_neutral else f"{html.escape(exchange_name.upper())} strategy for {symbol_text}"
     return (
         f"🤖 <b>{title}</b> "
-        f"<i>[OPENROUTER LLM COMPARISON]</i>\n\n"
+        f"<i>[LLM COMPARISON]</i>\n\n"
         f"<b>Action</b>: {action} (Confidence score: {confidence}; <i>uncalibrated</i>)\n"
         f"<b>Signal comparison</b>: OpenRouter {comparison}."
     )
@@ -1051,8 +1051,8 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
                 else:
                     legacy_response = (
                         f"🕰 <b>{html.escape(str(symbol))} strategy</b> "
-                        "<i>[OPENROUTER LLM COMPARISON]</i>\n\n"
-                        "<i>OpenRouter LLM comparison unavailable.</i>"
+                        "<i>[LLM COMPARISON]</i>\n\n"
+                        "<i>LLM COMPARISON unavailable.</i>"
                     )
                 responses.append(legacy_response)
 
