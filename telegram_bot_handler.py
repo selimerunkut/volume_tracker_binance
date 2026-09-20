@@ -397,10 +397,25 @@ def format_strategy_message(strategy, symbol, exchange_name, label):
 
     response += f"<b>Reasoning</b>: {reasoning}"
     analysis_data = strategy.get('analysis_data') or {}
+    btc_context = analysis_data.get('btc_market_context') or {}
+    if btc_context:
+        response += "\n\n<b>BTC market context</b>:"
+        if btc_context.get('status') != 'ok':
+            response += (
+                f"\nUnknown/stale — {html.escape(str(btc_context.get('error', 'live data unavailable')))}"
+            )
+        else:
+            age_minutes = btc_context.get('age_minutes')
+            age_text = f"; {int(age_minutes)} min old" if age_minutes is not None else ""
+            response += (
+                f"\n{html.escape(str(btc_context.get('summary', 'No summary available.')))}"
+                f"\nSource: {html.escape(str(btc_context.get('source', 'independent feed')))}"
+                f"; as of {html.escape(str(btc_context.get('as_of', 'unknown')))}{age_text}"
+            )
     # Only the deterministic strategy carries the grounded macro context.
     # Comparison models do not, so do not append misleading duplicate
     # unknown/stale sections to their messages.
-    if 'btc_market_regime' in analysis_data or 'cmc_altseason_index' in analysis_data:
+    elif 'btc_market_regime' in analysis_data or 'cmc_altseason_index' in analysis_data:
         regimes = analysis_data.get('btc_market_regime') or {}
         response += "\n\n<b>BTC market regime</b>:"
         for venue in VENUES:

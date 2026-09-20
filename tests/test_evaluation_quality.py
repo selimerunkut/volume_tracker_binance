@@ -59,6 +59,35 @@ def test_missing_initial_path_coverage_is_unevaluable():
     assert result["missing_candles"] == 23
 
 
+def test_off_hour_signal_uses_nearest_closed_hour_and_reports_offset():
+    item = _suggestion()
+    item["created_at"] = "2026-01-01T00:17:00+00:00"
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    candles = pd.DataFrame([
+        {
+            "timestamp": start + timedelta(hours=hour),
+            "high": 101.0,
+            "low": 99.0,
+            "close": 97.0,
+        }
+        for hour in range(1, 25)
+    ] + [{
+        "timestamp": datetime(2026, 1, 2, 1, tzinfo=timezone.utc),
+        "high": 101.0,
+        "low": 99.0,
+        "close": 97.0,
+    }])
+    result = evaluate_candle_path_detailed(
+        item,
+        candles,
+        now="2026-01-02T02:00:00+00:00",
+    )
+    assert result["status"] == "WIN"
+    assert result["raw_return_percent"] == -3.0
+    assert result["boundary_offset_minutes"] == 43.0
+    assert result["coverage_status"] == "PARTIAL_COVERAGE"
+
+
 def test_missing_boundary_candle_is_not_a_win():
     result = evaluate_candle_path_detailed(
         _suggestion(),

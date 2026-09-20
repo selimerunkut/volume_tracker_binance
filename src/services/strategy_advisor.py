@@ -8,7 +8,7 @@ from typing import Any
 from .altseason_service import get_latest as get_altseason
 from .db_service import save_suggestion
 from .deterministic_strategy import evaluate_strategy
-from .regime_service import VENUES, get_regimes_at
+from .btc_market_context import get_btc_market_context
 from .market_data_service import fetch_klines, get_current_price
 from .news_service import get_latest_news
 from .technical_analysis import calculate_indicators, get_latest_indicators
@@ -65,20 +65,11 @@ def analyze_and_suggest(symbol: str, exchange_name: str = "binance") -> dict[str
             "rule_ids": strategy["rule_ids"],
             "news_items": news_items,
         }
-        try:
-            regimes = get_regimes_at()
-            analysis_data["btc_market_regime"] = {
-                venue: {
-                    key: value for key, value in regime.items()
-                    if key in {"status", "direction", "raw_direction", "volatility", "volume_tag", "date", "source_age_days", "source_completed_through", "error"}
-                }
-                for venue, regime in regimes.items()
-            }
-        except Exception as regime_error:
-            logger.warning("BTC regime lookup failed: %s", regime_error)
-            analysis_data["btc_market_regime"] = {
-                venue: {"status": "unknown/stale"} for venue in VENUES
-            }
+        btc_context = get_btc_market_context()
+        analysis_data["btc_market_context"] = btc_context
+        # Keep one compatible regime-shaped record for existing reports, while
+        # the live Telegram message uses the independent context above.
+        analysis_data["btc_market_regime"] = {"hyperliquid": btc_context}
         try:
             analysis_data["cmc_altseason_index"] = get_altseason()
         except Exception as altseason_error:

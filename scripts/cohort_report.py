@@ -21,8 +21,9 @@ def _rows(conn, table):
             data = json.loads(raw or "{}")
         except json.JSONDecodeError:
             data = {}
+        context = data.get("btc_market_context") or {}
         regimes = data.get("btc_market_regime") or {}
-        regime = regimes.get("okx") or regimes.get("kraken") or {}
+        regime = context or regimes.get("hyperliquid") or regimes.get("okx") or regimes.get("kraken") or {}
         output.append({
             "direction": strategy,
             "status": status,

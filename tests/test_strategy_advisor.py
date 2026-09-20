@@ -1,8 +1,25 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from src.services import strategy_advisor
+
+
+@pytest.fixture(autouse=True)
+def stub_btc_context(monkeypatch):
+    monkeypatch.setattr(
+        strategy_advisor,
+        "get_btc_market_context",
+        lambda: {
+            "status": "ok",
+            "source": "test",
+            "direction": "range/transition",
+            "volatility": "normal",
+            "volume_tag": "normal",
+            "summary": "test BTC context",
+        },
+    )
 
 
 def _frame():

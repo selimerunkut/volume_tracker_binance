@@ -54,8 +54,12 @@ def _summary(values):
 
 def _report_table(rows):
     terminal = [row for row in rows if row.get("status") in TERMINAL_STATUSES]
-    policy_values = [row.get("pnl_percent") for row in terminal if row.get("pnl_percent") is not None]
-    market_values = [row.get("raw_return_percent") for row in terminal if row.get("raw_return_percent") is not None]
+    matched = [
+        row for row in terminal
+        if row.get("pnl_percent") is not None and row.get("raw_return_percent") is not None
+    ]
+    policy_values = [row.get("pnl_percent") for row in matched]
+    market_values = [row.get("raw_return_percent") for row in matched]
     return {
         "rows": len(rows),
         "actions": {
@@ -66,14 +70,15 @@ def _report_table(rows):
             status: sum(row.get("status") == status for row in rows)
             for status in sorted(TERMINAL_STATUSES)
         },
+        "matched_cohort_n": len(matched),
         "current_policy": {
             **_summary(policy_values),
-            "note": "Recorded strategy outcome; WAIT is not a traded return.",
+            "note": "Matched-cohort recorded outcome; WAIT is not a traded return.",
         },
-        "always_cash": _summary([0.0 for _ in market_values]),
+        "always_cash": _summary([0.0 for _ in matched]),
         "always_buy": {
             **_summary(market_values),
-            "unavailable": len(terminal) - len(market_values),
+            "unavailable": len(terminal) - len(matched),
         },
     }
 

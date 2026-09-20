@@ -195,18 +195,29 @@ def evaluate_candle_path_detailed(suggestion, klines, now=None):
             result.update(status=UNEVALUABLE, coverage_status='UNEVALUABLE')
         return result
 
-    window = frame[(frame['timestamp'] > pd.Timestamp(created_at)) &
-                   (frame['timestamp'] <= pd.Timestamp(min(now, window_end)))].copy()
     expected_interval = _candle_interval(frame)
-    missing = _missing_interior_candles(window, expected_interval, start=created_at)
+    path_window = frame[(frame['timestamp'] > pd.Timestamp(created_at)) &
+                        (frame['timestamp'] <= pd.Timestamp(min(now, window_end)))].copy()
+    observation_limit = pd.Timestamp(window_end) + pd.Timedelta(seconds=expected_interval.total_seconds())
+    observation_window = frame[(frame['timestamp'] > pd.Timestamp(created_at)) &
+                               (frame['timestamp'] <= observation_limit)].copy()
+    missing = _missing_interior_candles(path_window, expected_interval, start=created_at)
     result['missing_candles'] = missing
-    result['coverage_status'] = 'PARTIAL_COVERAGE' if missing else 'EVALUABLE'
 
-    endpoint = window[window['timestamp'] == pd.Timestamp(window_end)]
+    endpoint = observation_window[observation_window['timestamp'] >= pd.Timestamp(window_end)]
+    if endpoint.empty:
+        before = observation_window[observation_window['timestamp'] < pd.Timestamp(window_end)]
+        if not before.empty and (pd.Timestamp(window_end) - before.iloc[-1]['timestamp']) <= expected_interval * 1.5:
+            endpoint = before.tail(1)
+    boundary_offset_minutes = None
     if not endpoint.empty:
+        endpoint_timestamp = endpoint.iloc[-1]['timestamp']
+        boundary_offset_minutes = round(abs((endpoint_timestamp - pd.Timestamp(window_end)).total_seconds()) / 60, 2)
         close = float(endpoint.iloc[-1]['close'])
         raw_return = ((close - entry) / entry) * 100
         result['raw_return_percent'] = round(raw_return, 8)
+        result['boundary_offset_minutes'] = boundary_offset_minutes
+    result['coverage_status'] = 'PARTIAL_COVERAGE' if missing or boundary_offset_minutes else 'EVALUABLE'
 
     if action == 'WAIT':
         if now < window_end:
@@ -230,13 +241,14 @@ def evaluate_candle_path_detailed(suggestion, klines, now=None):
         result.update(status=UNEVALUABLE, coverage_status='INVALID_TARGETS')
         return result
 
-    initial_gap = (window.iloc[0]['timestamp'] - pd.Timestamp(created_at)).total_seconds() if not window.empty else 0
+    coverage_start = path_window if not path_window.empty else observation_window
+    initial_gap = (coverage_start.iloc[0]['timestamp'] - pd.Timestamp(created_at)).total_seconds() if not coverage_start.empty else 0
     if initial_gap > expected_interval.total_seconds() * 1.5:
         result.update(status=UNEVALUABLE, coverage_status='PARTIAL_COVERAGE')
         return result
 
     previous = None
-    for _, candle in window.iterrows():
+    for _, candle in path_window.iterrows():
         if previous is not None:
             gap = candle['timestamp'] - previous['timestamp']
             if gap > expected_interval * 1.5:

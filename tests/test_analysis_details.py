@@ -44,6 +44,33 @@ def test_strategy_message_renders_all_regime_venues():
     assert '<a href="https://coinmarketcap.com/charts/altcoin-season-index/">Altcoin season index</a>' in message
 
 
+def test_analysis_details_message_uses_independent_btc_context():
+    message = tb.format_strategy_message(
+        {
+            'action': 'WAIT',
+            'confidence': 50,
+            'reasoning': 'Neutral',
+            'analysis_data': {
+                'btc_market_context': {
+                    'status': 'ok',
+                    'source': 'Hyperliquid BTC perpetual 1h candles',
+                    'summary': 'BTC is bullish: +2.00% over 24h and +1.00% over 6h; price is above EMA50; volatility is normal and volume is expanded.',
+                    'as_of': '2026-09-20T12:00:00+00:00',
+                    'age_minutes': 3,
+                },
+            },
+        },
+        'SAFEUSD',
+        'kraken',
+        'deterministic',
+    )
+    assert '<b>BTC market context</b>' in message
+    assert 'BTC is bullish' in message
+    assert 'Hyperliquid BTC perpetual 1h candles' in message
+    assert '3 min old' in message
+    assert 'BTC market regime' not in message
+
+
 def test_analysis_details_message_is_structured_and_escaped():
     message = tb.format_analysis_details_message(
         {
