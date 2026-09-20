@@ -131,9 +131,10 @@ def test_menu_analyze_pair_button_defaults_to_all_exchanges_without_scope_picker
 
     texts = [call.get('text', '') for call in update.effective_message.calls]
     assert all('Choose the exchange scope' not in text for text in texts)
-    assert analyzed == [('BABYDOGE-EUR', 'binance'), ('BABYDOGE-EUR', 'kraken')]
-    assert 'BINANCE strategy for BABYDOGE-EUR' in texts[-1]
-    assert 'KRAKEN strategy for BABYDOGE-EUR' in texts[-1]
+    assert analyzed == [('BABYDOGE-EUR', 'binance')]
+    assert texts[-1].count('BABYDOGE-EUR strategy') == 2
+    assert 'BINANCE strategy for BABYDOGE-EUR' not in texts[-1]
+    assert 'KRAKEN strategy for BABYDOGE-EUR' not in texts[-1]
 
 
 def test_menu_analyze_pair_button_keeps_original_alert_message_visible(monkeypatch):
@@ -161,7 +162,7 @@ def test_menu_analyze_pair_button_keeps_original_alert_message_visible(monkeypat
     assert analyzed == [('STEEMUSDC', 'binance')]
     assert not any(call.get('action') == 'edit_message_text' for call in update.callback_query.calls)
     assert any('Analyzing STEEMUSDC on BINANCE' in call.get('text', '') for call in update.effective_message.calls)
-    assert any('BINANCE strategy for STEEMUSDC' in call.get('text', '') for call in update.effective_message.calls)
+    assert any('STEEMUSDC strategy' in call.get('text', '') for call in update.effective_message.calls)
 
 
 def test_menu_analyze_pair_button_can_preserve_existing_scope_picker(monkeypatch):
@@ -200,7 +201,7 @@ def test_analyze_command_defaults_to_all_exchanges_without_scope_picker(monkeypa
 
     texts = [call.get('text', '') for call in update.effective_message.calls]
     assert all('Choose the exchange scope' not in text for text in texts)
-    assert analyzed == [('SUIUSD', 'binance'), ('SUIUSD', 'kraken')]
+    assert analyzed == [('SUIUSD', 'binance')]
     assert any('Analyzing SUIUSD on BINANCE, KRAKEN' in text for text in texts)
 
 
@@ -279,7 +280,7 @@ def test_analyze_command_shows_shared_btc_context_once(monkeypatch):
 
     text = update.effective_message.calls[-1]['text']
     assert text.count('<b>BTC market context</b>') == 1
-    assert text.count('Signal comparison') == 2
+    assert text.count('Signal comparison') == 1
     assert 'repeated indicators' not in text
 
 
@@ -327,7 +328,7 @@ def test_scope_callback_analyze_uses_selected_exchange_and_symbol(monkeypatch):
     asyncio.run(telegram_bot_handler.scope_callback(update, context))
 
     assert observed['analysis_args'] == ('BTCUSD', 'kraken')
-    assert 'KRAKEN' in observed['edit_text']
+    assert 'BTCUSD strategy' in observed['edit_text']
 
 
 def test_analyze_symbol_skips_unavailable_exchange_with_clean_message(monkeypatch):
@@ -357,9 +358,10 @@ def test_analyze_symbol_skips_unavailable_exchange_with_clean_message(monkeypatc
     asyncio.run(telegram_bot_handler.analyze_symbol(update, context, symbol='BABYDOGE-EUR', exchange_scope='all'))
 
     final_text = update.callback_query.calls[-1]['text']
-    assert analyzed == [('BABYDOGE-EUR', 'binance'), ('BABYDOGE-EUR', 'okx')]
-    assert 'BINANCE strategy for BABYDOGE-EUR' in final_text
-    assert 'OKX strategy for BABYDOGE-EUR' in final_text
+    assert analyzed == [('BABYDOGE-EUR', 'binance')]
+    assert final_text.count('BABYDOGE-EUR strategy') == 2
+    assert 'BINANCE strategy for BABYDOGE-EUR' not in final_text
+    assert 'OKX strategy for BABYDOGE-EUR' not in final_text
     assert 'KRAKEN: BABYDOGE-EUR is not listed on this exchange.' in final_text
     assert 'error -' not in final_text
     assert 'Failed to fetch market data' not in final_text

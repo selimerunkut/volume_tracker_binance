@@ -375,14 +375,15 @@ def _format_regime_data_age(regime):
     )
 
 
-def format_strategy_message(strategy, symbol, exchange_name, label, include_btc_context=True):
+def format_strategy_message(strategy, symbol, exchange_name, label, include_btc_context=True, exchange_neutral=False):
     action = html.escape(str(strategy.get('action', 'N/A')))
     confidence = strategy.get('confidence', 0)
     reasoning = html.escape(str(strategy.get('reasoning', 'N/A')))
     symbol_text = html.escape(str(symbol))
 
+    title = f"{symbol_text} strategy" if exchange_neutral else f"{html.escape(exchange_name.upper())} strategy for {symbol_text}"
     response = (
-        f"🤖 <b>{html.escape(exchange_name.upper())} strategy for {symbol_text}</b> "
+        f"🤖 <b>{title}</b> "
         f"<i>[{html.escape(label)}]</i>\n\n"
         f"<b>Action</b>: {action} "
         f"(Confidence score: {confidence}; <i>uncalibrated</i>)\n"
@@ -454,7 +455,7 @@ def format_strategy_message(strategy, symbol, exchange_name, label, include_btc_
     return response
 
 
-def format_comparison_message(strategy, symbol, exchange_name, deterministic_action):
+def format_comparison_message(strategy, symbol, exchange_name, deterministic_action, exchange_neutral=False):
     action = html.escape(str(strategy.get('action', 'N/A')))
     confidence = strategy.get('confidence', 0)
     deterministic_text = html.escape(str(deterministic_action or 'N/A'))
@@ -464,8 +465,10 @@ def format_comparison_message(strategy, symbol, exchange_name, deterministic_act
         comparison = f"agrees with the deterministic {deterministic_text} signal"
     else:
         comparison = f"differs from the deterministic {deterministic_text} signal"
+    symbol_text = html.escape(str(symbol))
+    title = f"{symbol_text} strategy" if exchange_neutral else f"{html.escape(exchange_name.upper())} strategy for {symbol_text}"
     return (
-        f"🤖 <b>{html.escape(exchange_name.upper())} strategy for {html.escape(str(symbol))}</b> "
+        f"🤖 <b>{title}</b> "
         f"<i>[OPENROUTER LLM COMPARISON]</i>\n\n"
         f"<b>Action</b>: {action} (Confidence score: {confidence}; <i>uncalibrated</i>)\n"
         f"<b>Signal comparison</b>: OpenRouter {comparison}."
@@ -973,7 +976,8 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
     try:
         responses = []
         detail_buttons = []
-        btc_context_included = False
+        unavailable_responses = []
+        available_exchanges = []
         for exchange_name in exchanges:
             try:
                 validation_candidate = await asyncio.to_thread(validate_trading_pair, symbol, exchange_name=exchange_name)
@@ -987,13 +991,16 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
                     exchange_name,
                     validation_error,
                 )
-                responses.append(format_pair_unavailable_message(symbol, exchange_name, 'validation_failed'))
+                unavailable_responses.append(format_pair_unavailable_message(symbol, exchange_name, 'validation_failed'))
                 continue
 
-            if not is_valid:
-                responses.append(format_pair_unavailable_message(symbol, exchange_name, validation_reason))
-                continue
+            if is_valid:
+                available_exchanges.append(exchange_name)
+            else:
+                unavailable_responses.append(format_pair_unavailable_message(symbol, exchange_name, validation_reason))
 
+        if available_exchanges:
+            exchange_name = available_exchanges[0]
             strategy_candidate = await asyncio.to_thread(analyze_and_suggest, symbol, exchange_name=exchange_name)
             if inspect.isawaitable(strategy_candidate):
                 strategy = await strategy_candidate
@@ -1001,64 +1008,63 @@ async def analyze_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE, sym
                 strategy = strategy_candidate
             if not strategy:
                 responses.append(format_analysis_error_message(symbol, exchange_name, None))
-                continue
-
-            if "error" in strategy:
+            elif "error" in strategy:
                 responses.append(format_analysis_error_message(symbol, exchange_name, strategy['error']))
-                continue
-
-            responses.append(format_strategy_message(
-                strategy,
-                symbol,
-                exchange_name,
-                'DETERMINISTIC',
-                include_btc_context=not btc_context_included,
-            ))
-            if (strategy.get('analysis_data') or {}).get('btc_market_context'):
-                btc_context_included = True
-
-            try:
-                legacy_candidate = await asyncio.to_thread(
-                    llm_analyze_and_suggest,
-                    symbol,
-                    exchange_name=exchange_name,
-                    comparison_action=strategy.get('action'),
-                )
-                legacy_strategy = legacy_candidate
-                if inspect.isawaitable(legacy_candidate):
-                    legacy_strategy = await legacy_candidate
-            except Exception as legacy_error:
-                logger.warning(
-                    "Legacy LLM comparison failed for %s on %s: %s",
-                    symbol,
-                    exchange_name,
-                    legacy_error,
-                )
-                legacy_strategy = {"error": str(legacy_error)}
-
-            if legacy_strategy and 'error' not in legacy_strategy:
-                legacy_response = format_comparison_message(
-                    legacy_strategy,
-                    symbol,
-                    exchange_name,
-                    strategy.get('action'),
-                )
-                legacy_response += "\n\n<i>Informational only — not stored or tracked.</i>"
             else:
-                legacy_response = (
-                    f"🕰 <b>{html.escape(exchange_name.upper())} OPENROUTER LLM comparison for "
-                    f"{html.escape(str(symbol))}</b>\n\n"
-                    "<i>OpenRouter LLM comparison unavailable.</i>"
-                )
-            responses.append(legacy_response)
+                responses.append(format_strategy_message(
+                    strategy,
+                    symbol,
+                    exchange_name,
+                    'DETERMINISTIC',
+                    include_btc_context=True,
+                    exchange_neutral=True,
+                ))
 
-            if strategy.get('suggestion_id'):
-                detail_buttons.append(
-                    [InlineKeyboardButton(
-                        f"📜 {exchange_name.upper()} details",
-                        callback_data=f"details_{strategy['suggestion_id']}"
-                    )]
-                )
+                try:
+                    legacy_candidate = await asyncio.to_thread(
+                        llm_analyze_and_suggest,
+                        symbol,
+                        exchange_name=exchange_name,
+                        comparison_action=strategy.get('action'),
+                    )
+                    legacy_strategy = legacy_candidate
+                    if inspect.isawaitable(legacy_candidate):
+                        legacy_strategy = await legacy_candidate
+                except Exception as legacy_error:
+                    logger.warning(
+                        "Legacy LLM comparison failed for %s on %s: %s",
+                        symbol,
+                        exchange_name,
+                        legacy_error,
+                    )
+                    legacy_strategy = {"error": str(legacy_error)}
+
+                if legacy_strategy and 'error' not in legacy_strategy:
+                    legacy_response = format_comparison_message(
+                        legacy_strategy,
+                        symbol,
+                        exchange_name,
+                        strategy.get('action'),
+                        exchange_neutral=True,
+                    )
+                    legacy_response += "\n\n<i>Informational only — not stored or tracked.</i>"
+                else:
+                    legacy_response = (
+                        f"🕰 <b>{html.escape(str(symbol))} strategy</b> "
+                        "<i>[OPENROUTER LLM COMPARISON]</i>\n\n"
+                        "<i>OpenRouter LLM comparison unavailable.</i>"
+                    )
+                responses.append(legacy_response)
+
+                if strategy.get('suggestion_id'):
+                    detail_buttons.append(
+                        [InlineKeyboardButton(
+                            f"📜 {html.escape(str(symbol))} details",
+                            callback_data=f"details_{strategy['suggestion_id']}"
+                        )]
+                    )
+
+        responses.extend(unavailable_responses)
 
         if not responses:
             if update.callback_query:

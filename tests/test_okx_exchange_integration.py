@@ -118,7 +118,7 @@ def test_okx_is_exposed_through_registry_ui_and_service(monkeypatch):
     asyncio.run(telegram_bot_handler.scope_callback(update, context))
 
     assert observed['analysis'] == ('BTCUSDC', 'okx')
-    assert 'OKX' in observed['edited_text']
+    assert 'BTCUSDC strategy' in observed['edited_text']
 
 
 def test_okx_scanner_would_keep_okx_specific_urls_and_symbol_scope(monkeypatch):
