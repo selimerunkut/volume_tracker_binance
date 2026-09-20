@@ -80,13 +80,13 @@ def send_telegram_message(alert_message, include_restrict_button=False, dry_run=
             print(f"[{datetime.datetime.now()}] Failed to send Telegram message for {symbol}. Error: {response_json.get('description')}")
             return False
     except requests.exceptions.RequestException as e:
-        print(f"[{datetime.datetime.now()}] Network error sending Telegram message for {symbol}: {e}")
+        print(f"[{datetime.datetime.now()}] Network error sending Telegram message for {symbol}: {type(e).__name__}")
         return False
     except ValueError as e:
         print(f"[{datetime.datetime.now()}] JSON decoding error for Telegram API response for {symbol}: {e}")
         return False
     except Exception as e:
-        print(f"[{datetime.datetime.now()}] An unexpected error occurred while sending Telegram message for {symbol}: {e}")
+        print(f"[{datetime.datetime.now()}] An unexpected error occurred while sending Telegram message for {symbol}: {type(e).__name__}")
         return False
 
 def build_test_alert_message(symbol='TESTUSDC', exchange='BINANCE'):

@@ -49,7 +49,10 @@ def init_db():
             analysis_data TEXT,
             source TEXT DEFAULT 'manual',
             exchange_name TEXT,
-            resolved_at TEXT
+            resolved_at TEXT,
+            raw_return_percent REAL,
+            coverage_status TEXT,
+            missing_candles INTEGER DEFAULT 0
         )
     ''')
 
@@ -57,6 +60,9 @@ def init_db():
         ('source', "TEXT DEFAULT 'manual'"),
         ('exchange_name', 'TEXT'),
         ('resolved_at', 'TEXT'),
+        ('raw_return_percent', 'REAL'),
+        ('coverage_status', 'TEXT'),
+        ('missing_candles', 'INTEGER DEFAULT 0'),
     ):
         try:
             cursor.execute(f'ALTER TABLE suggestions ADD COLUMN {column} {definition}')
@@ -336,7 +342,8 @@ def get_pending_suggestions():
     return [_deserialize_analysis_data(row) for row in rows]
 
 
-def update_outcome(suggestion_id, status, pnl_percent=None):
+def update_outcome(suggestion_id, status, pnl_percent=None, raw_return_percent=None,
+                  coverage_status=None, missing_candles=None):
     """
     Update the outcome of a suggestion.
     
@@ -350,9 +357,18 @@ def update_outcome(suggestion_id, status, pnl_percent=None):
     
     cursor.execute('''
         UPDATE suggestions
-        SET status = ?, pnl_percent = ?, resolved_at = ?
+        SET status = ?, pnl_percent = ?, resolved_at = ?, raw_return_percent = ?,
+            coverage_status = ?, missing_candles = COALESCE(?, missing_candles)
         WHERE id = ?
-    ''', (status, pnl_percent, datetime.now().isoformat(), suggestion_id))
+    ''', (
+        status,
+        pnl_percent,
+        datetime.now().isoformat(),
+        raw_return_percent,
+        coverage_status,
+        missing_candles,
+        suggestion_id,
+    ))
     
     conn.commit()
     conn.close()

@@ -2,6 +2,7 @@
 Performance Tracker - Evaluates trade outcomes and updates database
 """
 from datetime import datetime, timedelta, timezone
+import pandas as pd
 from .db_service import (
     get_pending_suggestions,
     update_outcome,
@@ -128,55 +129,150 @@ def evaluate_signal_trade(signal, current_price):
     return 'EXPIRED', pnl
 
 
-def evaluate_candle_path(suggestion, klines, now=None):
-    """Evaluate TP/SL using candle highs/lows with a deterministic SL-first tie break."""
-    now = now or datetime.now()
-    created_at = datetime.fromisoformat(suggestion['created_at'])
-    if created_at.tzinfo is not None:
-        created_at = created_at.astimezone(timezone.utc).replace(tzinfo=None)
-    window_end = created_at + timedelta(hours=24)
-    action = suggestion['strategy_type']
-    frame = klines.copy() if klines is not None else None
-    if frame is None or frame.empty:
-        return 'PENDING', None
-    def normalize_timestamp(value):
-        value = value.to_pydatetime() if hasattr(value, 'to_pydatetime') else value
-        if getattr(value, 'tzinfo', None) is not None:
-            value = value.astimezone(timezone.utc).replace(tzinfo=None)
-        return value
+UNEVALUABLE = 'UNEVALUABLE'
 
-    frame['timestamp'] = frame['timestamp'].apply(normalize_timestamp)
-    frame = frame.sort_values('timestamp')
-    frame = frame[(frame['timestamp'] > created_at) & (frame['timestamp'] <= min(now, window_end))]
+
+def _utc_datetime(value):
+    value = datetime.fromisoformat(value) if isinstance(value, str) else value
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _prepare_candles(klines):
+    if klines is None or klines.empty or 'timestamp' not in klines:
+        return pd.DataFrame()
+    frame = klines.copy()
+    frame['timestamp'] = pd.to_datetime(frame['timestamp'], utc=True, errors='coerce')
+    for column in ('high', 'low', 'close'):
+        frame[column] = pd.to_numeric(frame[column], errors='coerce')
+    return frame.dropna(subset=['timestamp', 'high', 'low', 'close']).sort_values('timestamp')
+
+
+def _candle_interval(frame):
+    seconds = frame['timestamp'].diff().dt.total_seconds().dropna()
+    seconds = seconds[seconds > 0]
+    return timedelta(seconds=float(seconds.median())) if not seconds.empty else timedelta(hours=1)
+
+
+def _missing_interior_candles(frame, expected_interval, start=None):
+    if frame.empty:
+        return 0
+    expected_seconds = expected_interval.total_seconds()
+    missing = 0
+    if start is not None:
+        first_gap = (frame.iloc[0]['timestamp'] - pd.Timestamp(start)).total_seconds()
+        if first_gap > expected_seconds * 1.5:
+            missing += max(1, round(first_gap / expected_seconds) - 1)
+    for previous, current in zip(frame['timestamp'], frame['timestamp'].iloc[1:]):
+        gap = (current - previous).total_seconds()
+        if gap > expected_seconds * 1.5:
+            missing += max(1, round(gap / expected_seconds) - 1)
+    return missing
+
+
+def evaluate_candle_path_detailed(suggestion, klines, now=None):
+    """Evaluate a 24-hour window and report coverage separately from its outcome.
+
+    Interior candle gaps do not invalidate the fixed return calculation, but they
+    make an exact TP/SL path unknowable unless the target was hit before the gap.
+    """
+    created_at = _utc_datetime(suggestion['created_at'])
+    window_end = created_at + timedelta(hours=24)
+    now = _utc_datetime(now or datetime.now(timezone.utc))
+    action = str(suggestion['strategy_type']).upper()
+    entry = float(suggestion['entry_price'])
+    frame = _prepare_candles(klines)
+    result = {
+        'status': 'PENDING',
+        'pnl_percent': None,
+        'raw_return_percent': None,
+        'coverage_status': 'IN_PROGRESS' if now < window_end else 'UNEVALUABLE',
+        'missing_candles': 0,
+    }
+    if frame.empty:
+        if now >= window_end:
+            result.update(status=UNEVALUABLE, coverage_status='UNEVALUABLE')
+        return result
+
+    window = frame[(frame['timestamp'] > pd.Timestamp(created_at)) &
+                   (frame['timestamp'] <= pd.Timestamp(min(now, window_end)))].copy()
+    expected_interval = _candle_interval(frame)
+    missing = _missing_interior_candles(window, expected_interval, start=created_at)
+    result['missing_candles'] = missing
+    result['coverage_status'] = 'PARTIAL_COVERAGE' if missing else 'EVALUABLE'
+
+    endpoint = window[window['timestamp'] == pd.Timestamp(window_end)]
+    if not endpoint.empty:
+        close = float(endpoint.iloc[-1]['close'])
+        raw_return = ((close - entry) / entry) * 100
+        result['raw_return_percent'] = round(raw_return, 8)
+
     if action == 'WAIT':
         if now < window_end:
-            return 'PENDING', None
-        close = float(frame.iloc[-1]['close']) if not frame.empty else float(suggestion['entry_price'])
-        pct_change = ((close - float(suggestion['entry_price'])) / float(suggestion['entry_price'])) * 100
-        if pct_change >= WAIT_MOVE_THRESHOLD_PERCENT:
-            return 'LOSS', round(-pct_change, 2)
-        if pct_change <= -WAIT_MOVE_THRESHOLD_PERCENT:
-            return 'WIN', round(-pct_change, 2)
-        return 'WIN', 0
-    for _, candle in frame.iterrows():
+            return result
+        if endpoint.empty:
+            result.update(status=UNEVALUABLE, coverage_status='UNEVALUABLE')
+            return result
+        if raw_return >= WAIT_MOVE_THRESHOLD_PERCENT:
+            result.update(status='LOSS', pnl_percent=round(-raw_return, 2))
+        elif raw_return <= -WAIT_MOVE_THRESHOLD_PERCENT:
+            result.update(status='WIN', pnl_percent=round(-raw_return, 2))
+        else:
+            result.update(status='WIN', pnl_percent=0.0)
+        return result
+
+    tp = float(suggestion['take_profit'])
+    sl = float(suggestion['stop_loss'])
+    valid_targets = ((action == 'LONG' and sl < entry < tp) or
+                     (action == 'SHORT' and tp < entry < sl))
+    if not valid_targets:
+        result.update(status=UNEVALUABLE, coverage_status='INVALID_TARGETS')
+        return result
+
+    initial_gap = (window.iloc[0]['timestamp'] - pd.Timestamp(created_at)).total_seconds() if not window.empty else 0
+    if initial_gap > expected_interval.total_seconds() * 1.5:
+        result.update(status=UNEVALUABLE, coverage_status='PARTIAL_COVERAGE')
+        return result
+
+    previous = None
+    for _, candle in window.iterrows():
+        if previous is not None:
+            gap = candle['timestamp'] - previous['timestamp']
+            if gap > expected_interval * 1.5:
+                result.update(status=UNEVALUABLE, pnl_percent=None, coverage_status='PARTIAL_COVERAGE')
+                return result
         high = float(candle['high'])
         low = float(candle['low'])
-        tp = float(suggestion['take_profit'])
-        sl = float(suggestion['stop_loss'])
         if action == 'LONG':
             if low <= sl:
-                return 'LOSS', calculate_pnl(float(suggestion['entry_price']), sl, 'LONG')
+                result.update(status='LOSS', pnl_percent=calculate_pnl(entry, sl, 'LONG'))
+                return result
             if high >= tp:
-                return 'WIN', calculate_pnl(float(suggestion['entry_price']), tp, 'LONG')
+                result.update(status='WIN', pnl_percent=calculate_pnl(entry, tp, 'LONG'))
+                return result
         else:
             if high >= sl:
-                return 'LOSS', calculate_pnl(float(suggestion['entry_price']), sl, 'SHORT')
+                result.update(status='LOSS', pnl_percent=calculate_pnl(entry, sl, 'SHORT'))
+                return result
             if low <= tp:
-                return 'WIN', calculate_pnl(float(suggestion['entry_price']), tp, 'SHORT')
-    if now >= window_end and not frame.empty:
-        close = float(frame.iloc[-1]['close'])
-        return 'EXPIRED', calculate_pnl(float(suggestion['entry_price']), close, action)
-    return 'PENDING', None
+                result.update(status='WIN', pnl_percent=calculate_pnl(entry, tp, 'SHORT'))
+                return result
+        previous = candle
+
+    if now < window_end:
+        return result
+    if endpoint.empty:
+        result.update(status=UNEVALUABLE, coverage_status='UNEVALUABLE')
+        return result
+    result.update(status='EXPIRED', pnl_percent=calculate_pnl(entry, close, action))
+    return result
+
+
+def evaluate_candle_path(suggestion, klines, now=None):
+    """Backward-compatible ``(status, pnl)`` wrapper around detailed evaluation."""
+    result = evaluate_candle_path_detailed(suggestion, klines, now=now)
+    return result['status'], result['pnl_percent']
 
 
 def track_performance():
@@ -203,17 +299,27 @@ def track_performance():
         exchange_name = analysis_data.get('exchange_name', 'binance')
         
         try:
-            # Use candle highs/lows so intra-hour TP/SL touches are not missed.
-            current_price = get_current_price(symbol, exchange_name=exchange_name)
+            # Keep the ticker fetch for diagnostics; candle data is the source of truth.
+            get_current_price(symbol, exchange_name=exchange_name)
             klines = fetch_klines(symbol, interval='1h', limit=72, exchange_name=exchange_name)
-            if klines is None or klines.empty:
-                status, pnl = evaluate_trade(suggestion, current_price)
-            else:
-                status, pnl = evaluate_candle_path(suggestion, klines)
-            
+            detail = evaluate_candle_path_detailed(suggestion, klines)
+            status = detail['status']
+            pnl = detail['pnl_percent']
+
             if status != 'PENDING':
-                # Update database
-                update_outcome(suggestion_id, status, pnl)
+                try:
+                    update_outcome(
+                        suggestion_id,
+                        status,
+                        pnl,
+                        raw_return_percent=detail['raw_return_percent'],
+                        coverage_status=detail['coverage_status'],
+                        missing_candles=detail['missing_candles'],
+                    )
+                except TypeError as exc:
+                    if 'unexpected keyword argument' not in str(exc):
+                        raise
+                    update_outcome(suggestion_id, status, pnl)
                 updated_count += 1
                 print(f"[{datetime.now()}] Trade #{suggestion_id} ({symbol}): {status} (PnL: {pnl}%)")
             else:

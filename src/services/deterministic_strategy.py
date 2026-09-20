@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from decimal import Decimal
 from typing import Mapping
 
 REQUIRED_INDICATORS = (
@@ -26,7 +27,16 @@ def _number(values: Mapping[str, object], key: str) -> float:
 
 
 def _target_price(price: float, percent: float) -> float:
-    return round(price * (1 + percent / 100), 2)
+    """Return a target without forcing every market to two decimal places."""
+    return float(Decimal(str(price)) * (Decimal(1) + Decimal(str(percent)) / Decimal(100)))
+
+
+def validate_targets(entry: float, take_profit: float, stop_loss: float, action: str) -> None:
+    """Reject target prices that are impossible or inverted for the action."""
+    if action == "LONG" and not stop_loss < entry < take_profit:
+        raise ValueError("LONG targets must satisfy stop_loss < entry < take_profit")
+    if action == "SHORT" and not take_profit < entry < stop_loss:
+        raise ValueError("SHORT targets must satisfy take_profit < entry < stop_loss")
 
 
 def _confidence(score: int, action: str) -> int:
@@ -109,7 +119,7 @@ def evaluate_strategy(indicators: Mapping[str, object], current_price: float) ->
         reason_tail = "SHORT requires at most -3."
     else:
         action = "WAIT"
-        reason_tail = "WAIT requires a score between -2 and +2."
+        reason_tail = "WAIT means no actionable setup under the current rules (score between -2 and +2)."
 
     confidence = _confidence(score, action)
     entry = price
@@ -122,6 +132,9 @@ def evaluate_strategy(indicators: Mapping[str, object], current_price: float) ->
     else:
         tp = price
         sl = price
+
+    if action in {"LONG", "SHORT"}:
+        validate_targets(entry, tp, sl, action)
 
     reasoning = " ".join(reasons + [f"Total score: {score:+d}; {reason_tail}"])
 

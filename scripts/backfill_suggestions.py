@@ -16,7 +16,7 @@ import pandas as pd
 
 from src.services.db_service import DB_PATH, get_connection, init_db
 from src.services.deterministic_strategy import evaluate_strategy
-from src.services.performance_tracker import evaluate_candle_path
+from src.services.performance_tracker import evaluate_candle_path_detailed
 from src.services.regime_service import get_regimes_at
 from src.services.technical_analysis import calculate_indicators, get_latest_indicators
 
@@ -50,25 +50,38 @@ def run(input_dir, exchange_name="kraken", db_path=DB_PATH):
                 at_close = frame[frame[timestamp_column] <= day + pd.Timedelta(hours=23)]
                 if len(at_close) < 250:
                     continue
+                entry_time = day + pd.Timedelta(hours=23)
+                created_at = entry_time.isoformat()
                 existing = conn.execute(
                     "SELECT 1 FROM backfill_suggestions WHERE symbol=? AND exchange_name=? AND created_at=?",
-                    (symbol, exchange_name, day.isoformat()),
+                    (symbol, exchange_name, created_at),
                 ).fetchone()
                 if existing:
                     continue
                 indicators = get_latest_indicators(calculate_indicators(at_close.tail(250)))
                 price = float(at_close.iloc[-1]["close"])
                 strategy = evaluate_strategy(indicators, price)
-                future = frame[(frame[timestamp_column] > day + pd.Timedelta(hours=23)) & (frame[timestamp_column] <= day + pd.Timedelta(days=2))]
+                future = frame[(frame[timestamp_column] > entry_time) & (frame[timestamp_column] <= entry_time + pd.Timedelta(days=1))]
                 suggestion = {
-                    "created_at": day.to_pydatetime().replace(tzinfo=None).isoformat(),
+                    "created_at": created_at,
                     "strategy_type": strategy["action"], "entry_price": strategy["entry"],
                     "take_profit": strategy["tp"], "stop_loss": strategy["sl"],
                 }
-                status, pnl = evaluate_candle_path(suggestion, future.rename(columns={timestamp_column: "timestamp"}), now=day.to_pydatetime().replace(tzinfo=None) + pd.Timedelta(days=2))
+                detail = evaluate_candle_path_detailed(
+                    suggestion,
+                    future.rename(columns={timestamp_column: "timestamp"}),
+                    now=(entry_time + pd.Timedelta(days=1)).to_pydatetime(),
+                )
+                status = detail["status"]
+                pnl = detail["pnl_percent"]
                 regimes = get_regimes_at(day.to_pydatetime())
-                data = {"source": "backfill", "exchange_name": exchange_name, "btc_market_regime": regimes,
-                        "trigger": "daily_close", "symbol": symbol}
+                data = {
+                    "source": "backfill", "exchange_name": exchange_name,
+                    "btc_market_regime": regimes, "trigger": "daily_close", "symbol": symbol,
+                    "raw_return_percent": detail["raw_return_percent"],
+                    "coverage_status": detail["coverage_status"],
+                    "missing_candles": detail["missing_candles"],
+                }
                 conn.execute(
                     """INSERT OR IGNORE INTO backfill_suggestions
                     (symbol, exchange_name, created_at, strategy_type, entry_price, take_profit,

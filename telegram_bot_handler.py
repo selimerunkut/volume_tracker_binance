@@ -350,7 +350,8 @@ def format_analysis_details_message(details):
     message = (
         f"📜 <b>{exchange_name} analysis details for {symbol}</b>\n\n"
         f"<b>Action</b>: {action}\n"
-        f"<b>Confidence</b>: {confidence if confidence is not None else 'N/A'}%\n"
+        f"<b>Confidence score</b>: {confidence if confidence is not None else 'N/A'} "
+        f"<i>(uncalibrated; not a probability)</i>\n"
         f"<b>Deterministic score</b>: {score}\n"
         f"<b>Triggered rules</b>: {rule_ids_text}\n\n"
         f"<b>Entry / TP / SL</b>: {format_indicator_value(data.get('entry'))} / {format_indicator_value(data.get('tp'))} / {format_indicator_value(data.get('sl'))}\n\n"
@@ -385,7 +386,7 @@ def format_strategy_message(strategy, symbol, exchange_name, label):
         f"🤖 <b>{html.escape(exchange_name.upper())} strategy for {symbol_text}</b> "
         f"<i>[{html.escape(label)}]</i>\n\n"
         f"<b>Action</b>: {action} "
-        f"(Confidence: {confidence}%)\n"
+        f"(Confidence score: {confidence}; <i>uncalibrated</i>)\n"
     )
 
     if strategy.get('action') in ['LONG', 'SHORT']:
@@ -1590,8 +1591,9 @@ async def run_coingecko_trending(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Log errors and Telegram API conflicts."""
-    logger.error(f"Bot error: {context.error}", exc_info=context.error)
+    """Log errors without exposing the Telegram bot token."""
+    logger.error("Bot error: %s", type(context.error).__name__)
+
 
 def main() -> None:
     """Start the bot."""
@@ -1599,6 +1601,9 @@ def main() -> None:
         level=logging.INFO,
         format='[%(asctime)s] %(levelname)s %(name)s: %(message)s'
     )
+    # httpx logs full Telegram URLs at INFO, which includes the bot token.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger.error("Telegram bot token or chat ID not found. Bot startup aborted.")
