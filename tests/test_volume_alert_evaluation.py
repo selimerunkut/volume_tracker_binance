@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from src.services.volume_alert_evaluation import (
     calculate_forward_return,
+    calculate_forward_return_minutes,
     compare_baselines,
     deduplicate_alert_events,
     evaluate_matched_events,
@@ -43,6 +44,23 @@ def test_select_completed_close_never_uses_future_candle_close():
 def test_forward_return_uses_last_completed_candle():
     result = calculate_forward_return(_event(1), _candles(), 2)
     assert result == 1.0
+
+
+def test_short_horizon_uses_completed_five_minute_candles():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    candles = [
+        {"timestamp": start + timedelta(minutes=5 * index), "close": 100.0 + index}
+        for index in range(8)
+    ]
+    event = _event(1, detected_at="2026-01-01T00:02:00+00:00")
+
+    immediate = calculate_forward_return_minutes(event, candles, hold_minutes=15)
+    delayed = calculate_forward_return_minutes(
+        event, candles, entry_delay_minutes=5, hold_minutes=15
+    )
+
+    assert immediate == 2.0
+    assert delayed == 3.0
 
 
 def test_matched_evaluation_uses_same_events_for_all_horizons():

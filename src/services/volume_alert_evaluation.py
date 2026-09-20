@@ -65,6 +65,45 @@ def calculate_forward_return(event, candles, horizon_hours, interval=timedelta(h
     return (float(_candle_close(endpoint)) - entry_price) / entry_price * 100
 
 
+def calculate_forward_return_minutes(
+    event,
+    candles,
+    entry_delay_minutes=0,
+    hold_minutes=30,
+    interval=timedelta(minutes=5),
+):
+    """Evaluate a short-horizon trade using completed fine-grained candles.
+
+    A zero-delay entry uses the captured event price. A delayed entry uses the
+    latest completed candle close at the delayed entry time. The exit also uses
+    the latest completed close at or before the requested holding boundary.
+    """
+    detected_at = _utc_naive(event["detected_at"])
+    delay = timedelta(minutes=entry_delay_minutes)
+    entry_time = detected_at + delay
+    if entry_delay_minutes:
+        entry_candle = select_completed_close(candles, entry_time, interval=interval)
+        if entry_candle is None:
+            return None
+        entry_price = _candle_close(entry_candle)
+    else:
+        entry_value = event.get("entry_price", event.get("close_price"))
+        if entry_value is None:
+            return None
+        entry_price = float(entry_value)
+    if entry_price <= 0:
+        return None
+
+    exit_candle = select_completed_close(
+        candles,
+        entry_time + timedelta(minutes=hold_minutes),
+        interval=interval,
+    )
+    if exit_candle is None:
+        return None
+    return (_candle_close(exit_candle) - entry_price) / entry_price * 100
+
+
 def deduplicate_alert_events(events):
     """Keep one observation per exchange/symbol/candle/level.
 
