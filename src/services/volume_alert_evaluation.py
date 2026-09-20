@@ -71,6 +71,7 @@ def calculate_forward_return_minutes(
     entry_delay_minutes=0,
     hold_minutes=30,
     interval=timedelta(minutes=5),
+    as_of=None,
 ):
     """Evaluate a short-horizon trade using completed fine-grained candles.
 
@@ -81,6 +82,9 @@ def calculate_forward_return_minutes(
     detected_at = _utc_naive(event["detected_at"])
     delay = timedelta(minutes=entry_delay_minutes)
     entry_time = detected_at + delay
+    maturity_time = _utc_naive(as_of) if as_of is not None else None
+    if maturity_time is not None and entry_time + timedelta(minutes=hold_minutes) > maturity_time:
+        return None
     if entry_delay_minutes:
         entry_candle = select_completed_close(candles, entry_time, interval=interval)
         if entry_candle is None:

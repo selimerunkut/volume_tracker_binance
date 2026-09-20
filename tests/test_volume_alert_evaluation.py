@@ -61,6 +61,12 @@ def test_short_horizon_uses_completed_five_minute_candles():
 
     assert immediate == 2.0
     assert delayed == 3.0
+    assert calculate_forward_return_minutes(
+        event,
+        candles,
+        hold_minutes=30,
+        as_of="2026-01-01T00:20:00+00:00",
+    ) is None
 
 
 def test_matched_evaluation_uses_same_events_for_all_horizons():
