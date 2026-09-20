@@ -29,7 +29,10 @@ def create_auto_signal(symbol, exchange_name):
     indicator_frame = calculate_indicators(klines)
     indicators = get_latest_indicators(indicator_frame)
     strategy = evaluate_strategy(indicators, price)
-    normalized_strength = evaluate_normalized_strength(indicator_frame)
+    # Shadow scoring uses only closed candles; the live deterministic policy
+    # below remains unchanged and continues to use its existing input frame.
+    normalized_frame = indicator_frame.iloc[:-1].copy() if len(indicator_frame) > 1 else indicator_frame
+    normalized_strength = evaluate_normalized_strength(normalized_frame)
     analysis_data = {
         "exchange_name": exchange_name,
         "source": "auto",
